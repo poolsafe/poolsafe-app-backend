@@ -1,0 +1,38 @@
+# Dependências e builds locais
+node_modules/
+dist/
+
+# Variáveis de ambiente com segredos reais
+.env
+.env.local
+.env.*.local
+
+# Chaves e credenciais (nunca versionar)
+*.pem
+*.key
+*.p12
+*.pfx
+google-services.json
+service-account*.json
+
+# Build incremental do TypeScript
+*.tsbuildinfo
+
+# Logs
+*.log
+logs/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# IDE e editores
+.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Docker
+.dockerignore

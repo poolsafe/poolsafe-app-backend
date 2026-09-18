@@ -1,0 +1,22 @@
+// Schema do Prisma ORM para o PoolSafe
+//
+// Fonte de verdade do schema lógico: docs/database-schema.md
+//
+// ATENÇÃO: Esta é a configuração mínima de bootstrap.
+// Os modelos de entidade (USUARIO, SESSAO, CAMERA, MONITORAMENTO,
+// ALERTA, DISPOSITIVO, etc.) serão adicionados em etapa posterior,
+// após autorização, conforme docs/database-schema.md.
+//
+// Prisma ORM 7: a URL de conexão é configurada em prisma.config.ts
+// (não mais no datasource do schema). Ver: https://pris.ly/d/config-datasource
+//
+// Não execute migrate dev, migrate deploy ou db push
+// antes da modelagem ser autorizada.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
