@@ -12,8 +12,9 @@ FROM node:24-alpine AS deps
 
 WORKDIR /app
 
-# Copiar apenas os manifestos de dependência
-COPY package.json package-lock.json ./
+# Copiar manifestos de dependência e arquivos do Prisma (necessários para o postinstall: prisma generate)
+COPY package.json package-lock.json prisma.config.ts ./
+COPY prisma/ ./prisma/
 
 # Instalar somente dependências de produção
 RUN npm ci --omit=dev
@@ -23,17 +24,14 @@ FROM node:24-alpine AS builder
 
 WORKDIR /app
 
-# Copiar manifestos e node_modules completos (incluindo devDependencies para build)
-COPY package.json package-lock.json ./
+# Copiar manifestos e Prisma para instalação completa com devDependencies
+COPY package.json package-lock.json prisma.config.ts ./
+COPY prisma/ ./prisma/
 RUN npm ci
 
 # Copiar código-fonte e configurações
 COPY nest-cli.json tsconfig.json tsconfig.build.json ./
 COPY src/ ./src/
-COPY prisma/ ./prisma/
-
-# Gerar o Prisma Client
-RUN npx prisma generate
 
 # Compilar o NestJS
 RUN npm run build
@@ -52,9 +50,10 @@ COPY --from=deps /app/node_modules ./node_modules
 # Copiar o artefato compilado do estágio builder
 COPY --from=builder /app/dist ./dist
 
-# Copiar prisma (schema e client gerado)
+# Copiar prisma (schema e client gerado) e configuração
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/prisma ./prisma
+COPY prisma.config.ts ./
 
 # Copiar package.json (necessário para "type": "module")
 COPY package.json ./

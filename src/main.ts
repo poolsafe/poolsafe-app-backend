@@ -63,7 +63,7 @@ async function bootstrap(): Promise<void> {
       .setTitle('PoolSafe API')
       .setDescription(
         'API Node.js do PoolSafe — v1. ' +
-        'Consulte docs/api-contract.md para o contrato canônico.',
+          'Consulte docs/api-contract.md para o contrato canônico.',
       )
       .setVersion('1')
       .addBearerAuth()

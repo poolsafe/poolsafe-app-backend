@@ -17,9 +17,7 @@ function validateEnv(config: Record<string, unknown>): EnvConfig {
   const errors = validateSync(validated, { skipMissingProperties: false });
 
   if (errors.length > 0) {
-    throw new Error(
-      `Configuração de ambiente inválida:\n${errors.toString()}`,
-    );
+    throw new Error(`Configuração de ambiente inválida:\n${errors.toString()}`);
   }
 
   return validated;
@@ -51,10 +49,7 @@ function validateEnv(config: Record<string, unknown>): EnvConfig {
           process.env['NODE_ENV'] !== 'production'
             ? { target: 'pino-pretty' }
             : undefined,
-        redact: [
-          'req.headers.authorization',
-          'req.headers.cookie',
-        ],
+        redact: ['req.headers.authorization', 'req.headers.cookie'],
       },
     }),
 

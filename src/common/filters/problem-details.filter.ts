@@ -55,10 +55,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       }
     } else if (exception instanceof Error) {
       // Erros internos: logar sem expor detalhes ao cliente
-      this.logger.error(
-        { requestId, err: exception },
-        'Unhandled exception',
-      );
+      this.logger.error({ requestId, err: exception }, 'Unhandled exception');
     }
 
     const body = {
