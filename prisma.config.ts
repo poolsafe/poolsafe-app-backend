@@ -1,4 +1,5 @@
-import { defineConfig } from 'prisma/config';
+import 'dotenv/config';
+import { defineConfig, env } from 'prisma/config';
 
 /**
  * prisma.config.ts — configuração do Prisma ORM 7.
@@ -16,7 +17,10 @@ import { defineConfig } from 'prisma/config';
 export default defineConfig({
   schema: './prisma/schema.prisma',
   datasource: {
-    url: process.env['DATABASE_URL'] ?? '',
+    url: env('DATABASE_URL'),
+    shadowDatabaseUrl: process.env['SHADOW_DATABASE_URL']
+      ? env('SHADOW_DATABASE_URL')
+      : undefined,
   },
   migrations: {
     path: './prisma/migrations',

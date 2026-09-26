@@ -1,22 +1,294 @@
-// Schema do Prisma ORM para o PoolSafe
-//
-// Fonte de verdade do schema lógico: docs/database-schema.md
-//
-// ATENÇÃO: Esta é a configuração mínima de bootstrap.
-// Os modelos de entidade (USUARIO, SESSAO, CAMERA, MONITORAMENTO,
-// ALERTA, DISPOSITIVO, etc.) serão adicionados em etapa posterior,
-// após autorização, conforme docs/database-schema.md.
-//
-// Prisma ORM 7: a URL de conexão é configurada em prisma.config.ts
-// (não mais no datasource do schema). Ver: https://pris.ly/d/config-datasource
-//
-// Não execute migrate dev, migrate deploy ou db push
-// antes da modelagem ser autorizada.
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "mysql"
+}
+
+model User {
+  id              BigInt    @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  name            String    @map("nome") @db.VarChar(120)
+  email           String    @unique(map: "uq_usuario_email") @map("email") @db.VarChar(254)
+  passwordHash    String    @map("senha_hash") @db.VarChar(255)
+  phone           String?   @map("telefone") @db.VarChar(20)
+  status          String    @default("ATIVO") @map("status") @db.VarChar(20)
+  emailVerifiedAt DateTime? @map("email_verificado_em") @db.DateTime(3)
+  lastLoginAt     DateTime? @map("ultimo_login_em") @db.DateTime(3)
+  createdAt       DateTime  @default(now()) @map("criado_em") @db.DateTime(3)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("atualizado_em") @db.DateTime(3)
+  deactivatedAt   DateTime? @map("desativado_em") @db.DateTime(3)
+
+  devices             Device[]
+  authSessions        AuthSession[]
+  passwordResetTokens PasswordResetToken[]
+  cameraAccesses      CameraAccess[]
+  startedMonitorings  Monitoring[]         @relation("MonitoringInitiator")
+  monitoringEvents    MonitoringEvent[]
+  alertRecipients     AlertRecipient[]
+
+  @@map("usuario")
+}
+
+model Camera {
+  id                   BigInt    @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  integrationCode      String    @unique(map: "uq_camera_codigo_integracao") @map("codigo_integracao") @db.VarChar(100)
+  name                 String    @map("nome") @db.VarChar(100)
+  location             String?   @map("localizacao") @db.VarChar(150)
+  administrativeStatus String    @default("ATIVA") @map("status_administrativo") @db.VarChar(20)
+  lastCommunicationAt  DateTime? @map("ultima_comunicacao_em") @db.DateTime(3)
+  createdAt            DateTime  @default(now()) @map("criado_em") @db.DateTime(3)
+  updatedAt            DateTime  @default(now()) @updatedAt @map("atualizado_em") @db.DateTime(3)
+  deactivatedAt        DateTime? @map("desativado_em") @db.DateTime(3)
+
+  cameraAccesses    CameraAccess[]
+  monitoringCameras MonitoringCamera[]
+  alerts            Alert[]
+  systemLogs        SystemLog[]
+
+  @@index([administrativeStatus, lastCommunicationAt], map: "idx_camera_status_comunicacao")
+  @@map("camera")
+}
+
+model Device {
+  id                     BigInt    @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  userId                 BigInt    @map("usuario_id") @db.UnsignedBigInt
+  installationIdentifier String    @map("identificador_instalacao") @db.VarChar(128)
+  platform               String    @map("plataforma") @db.VarChar(20)
+  fcmToken               String?   @unique(map: "uq_dispositivo_fcm_token") @map("fcm_token") @db.VarChar(512)
+  active                 Boolean   @default(true) @map("ativo")
+  tokenUpdatedAt         DateTime? @map("token_atualizado_em") @db.DateTime(3)
+  lastAccessAt           DateTime? @map("ultimo_acesso_em") @db.DateTime(3)
+  invalidatedAt          DateTime? @map("invalidado_em") @db.DateTime(3)
+  createdAt              DateTime  @default(now()) @map("criado_em") @db.DateTime(3)
+  updatedAt              DateTime  @default(now()) @updatedAt @map("atualizado_em") @db.DateTime(3)
+
+  user                   User                   @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_dispositivo_usuario")
+  authSessions           AuthSession[]
+  notificationDeliveries NotificationDelivery[]
+
+  @@unique([userId, installationIdentifier], map: "uq_dispositivo_usuario_instalacao")
+  @@index([userId, active], map: "idx_dispositivo_usuario_ativo")
+  @@map("dispositivo")
+}
+
+model AuthSession {
+  id         BigInt    @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  userId     BigInt    @map("usuario_id") @db.UnsignedBigInt
+  deviceId   BigInt?   @map("dispositivo_id") @db.UnsignedBigInt
+  tokenHash  String    @unique(map: "uq_sessao_autenticacao_token_hash") @map("token_hash") @db.Char(64)
+  expiresAt  DateTime  @map("expira_em") @db.DateTime(3)
+  lastUsedAt DateTime? @map("ultimo_uso_em") @db.DateTime(3)
+  revokedAt  DateTime? @map("revogada_em") @db.DateTime(3)
+  createdAt  DateTime  @default(now()) @map("criado_em") @db.DateTime(3)
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "fk_sessao_autenticacao_usuario")
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull, onUpdate: Restrict, map: "fk_sessao_autenticacao_dispositivo")
+
+  @@index([userId, revokedAt, expiresAt], map: "idx_sessao_usuario_revogacao_expiracao")
+  @@index([expiresAt], map: "idx_sessao_expiracao")
+  @@map("sessao_autenticacao")
+}
+
+model PasswordResetToken {
+  id        BigInt    @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  userId    BigInt    @map("usuario_id") @db.UnsignedBigInt
+  tokenHash String    @unique(map: "uq_token_recuperacao_senha_hash") @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expira_em") @db.DateTime(3)
+  usedAt    DateTime? @map("utilizado_em") @db.DateTime(3)
+  createdAt DateTime  @default(now()) @map("criado_em") @db.DateTime(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "fk_token_recuperacao_senha_usuario")
+
+  @@index([userId, createdAt], map: "idx_token_recuperacao_usuario")
+  @@index([expiresAt, usedAt], map: "idx_token_recuperacao_expiracao")
+  @@map("token_recuperacao_senha")
+}
+
+model CameraAccess {
+  id        BigInt    @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  userId    BigInt    @map("usuario_id") @db.UnsignedBigInt
+  cameraId  BigInt    @map("camera_id") @db.UnsignedBigInt
+  active    Boolean   @default(true) @map("ativo")
+  grantedAt DateTime  @default(now()) @map("concedido_em") @db.DateTime(3)
+  revokedAt DateTime? @map("revogado_em") @db.DateTime(3)
+  createdAt DateTime  @default(now()) @map("criado_em") @db.DateTime(3)
+  updatedAt DateTime  @default(now()) @updatedAt @map("atualizado_em") @db.DateTime(3)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_acesso_camera_usuario")
+  camera Camera @relation(fields: [cameraId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_acesso_camera_camera")
+
+  @@index([userId, active, cameraId], map: "idx_acesso_camera_usuario_ativo_camera")
+  @@index([cameraId, active, userId], map: "idx_acesso_camera_camera_ativo_usuario")
+  @@map("acesso_camera")
+}
+
+model Monitoring {
+  id              BigInt    @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  status          String    @default("ATIVO") @map("status") @db.VarChar(20)
+  startedByUserId BigInt    @map("iniciado_por_usuario_id") @db.UnsignedBigInt
+  startedAt       DateTime  @default(now()) @map("iniciado_em") @db.DateTime(3)
+  pausedAt        DateTime? @map("pausado_em") @db.DateTime(3)
+  endedAt         DateTime? @map("encerrado_em") @db.DateTime(3)
+  createdAt       DateTime  @default(now()) @map("criado_em") @db.DateTime(3)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("atualizado_em") @db.DateTime(3)
+
+  startedByUser     User               @relation("MonitoringInitiator", fields: [startedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_monitoramento_usuario_iniciador")
+  monitoringCameras MonitoringCamera[]
+  monitoringEvents  MonitoringEvent[]
+  alerts            Alert[]
+  systemLogs        SystemLog[]
+
+  @@index([status, startedAt], map: "idx_monitoramento_status_inicio")
+  @@index([startedByUserId], map: "idx_monitoramento_usuario_iniciador")
+  @@map("monitoramento")
+}
+
+model MonitoringCamera {
+  monitoringId BigInt   @map("monitoramento_id") @db.UnsignedBigInt
+  cameraId     BigInt   @map("camera_id") @db.UnsignedBigInt
+  addedAt      DateTime @default(now()) @map("adicionada_em") @db.DateTime(3)
+
+  monitoring Monitoring @relation(fields: [monitoringId], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "fk_monitoramento_camera_monitoramento")
+  camera     Camera     @relation(fields: [cameraId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_monitoramento_camera_camera")
+  alerts     Alert[]
+
+  @@id([monitoringId, cameraId])
+  @@index([cameraId, monitoringId], map: "idx_monitoramento_camera_camera_monitoramento")
+  @@map("monitoramento_camera")
+}
+
+model MonitoringEvent {
+  id           BigInt   @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  monitoringId BigInt   @map("monitoramento_id") @db.UnsignedBigInt
+  userId       BigInt?  @map("usuario_id") @db.UnsignedBigInt
+  type         String   @map("tipo") @db.VarChar(20)
+  reason       String?  @map("motivo") @db.VarChar(255)
+  occurredAt   DateTime @default(now()) @map("ocorrido_em") @db.DateTime(3)
+
+  monitoring Monitoring @relation(fields: [monitoringId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_evento_monitoramento_monitoramento")
+  user       User?      @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: Restrict, map: "fk_evento_monitoramento_usuario")
+
+  @@index([monitoringId, occurredAt], map: "idx_evento_monitoramento_ocorrido")
+  @@map("evento_monitoramento")
+}
+
+model Alert {
+  id            BigInt   @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  eventKey      String   @unique(map: "uq_alerta_chave_evento") @map("chave_evento") @db.VarChar(100)
+  monitoringId  BigInt   @map("monitoramento_id") @db.UnsignedBigInt
+  cameraId      BigInt   @map("camera_id") @db.UnsignedBigInt
+  type          String   @default("POSSIVEL_RISCO") @map("tipo") @db.VarChar(50)
+  severity      String   @map("severidade") @db.VarChar(20)
+  detectedAt    DateTime @map("detectado_em") @db.DateTime(3)
+  confidence    Decimal? @map("confianca") @db.Decimal(5, 4)
+  modelVersion  String?  @map("versao_modelo") @db.VarChar(50)
+  technicalData Json?    @map("dados_tecnicos") @db.Json
+  createdAt     DateTime @default(now()) @map("criado_em") @db.DateTime(3)
+
+  monitoring       Monitoring       @relation(fields: [monitoringId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_alerta_monitoramento")
+  camera           Camera           @relation(fields: [cameraId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_alerta_camera")
+  monitoringCamera MonitoringCamera @relation(fields: [monitoringId, cameraId], references: [monitoringId, cameraId], onDelete: Restrict, onUpdate: Restrict, map: "fk_alerta_monitoramento_camera")
+  evidence         AlertEvidence?
+  recipients       AlertRecipient[]
+  systemLogs       SystemLog[]
+
+  @@index([cameraId, detectedAt(sort: Desc)], map: "idx_alerta_camera_deteccao")
+  @@index([monitoringId, detectedAt(sort: Desc)], map: "idx_alerta_monitoramento_deteccao")
+  @@index([monitoringId, cameraId], map: "idx_alerta_monitoramento_camera")
+  @@map("alerta")
+}
+
+model AlertEvidence {
+  id         BigInt    @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  alertId    BigInt    @unique(map: "uq_evidencia_alerta_alerta") @map("alerta_id") @db.UnsignedBigInt
+  mimeType   String    @map("mime_type") @db.VarChar(100)
+  content    Bytes?    @map("conteudo") @db.LongBlob
+  sizeBytes  BigInt    @map("tamanho_bytes") @db.UnsignedBigInt
+  hashSha256 String    @map("hash_sha256") @db.Char(64)
+  createdAt  DateTime  @default(now()) @map("criado_em") @db.DateTime(3)
+  expiresAt  DateTime  @map("expira_em") @db.DateTime(3)
+  removedAt  DateTime? @map("removida_em") @db.DateTime(3)
+
+  alert Alert @relation(fields: [alertId], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "fk_evidencia_alerta_alerta")
+
+  @@index([expiresAt, removedAt], map: "idx_evidencia_alerta_expiracao_remocao")
+  @@map("evidencia_alerta")
+}
+
+model AlertRecipient {
+  alertId    BigInt   @map("alerta_id") @db.UnsignedBigInt
+  userId     BigInt   @map("usuario_id") @db.UnsignedBigInt
+  assignedAt DateTime @default(now()) @map("atribuido_em") @db.DateTime(3)
+
+  alert        Alert         @relation(fields: [alertId], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "fk_alerta_destinatario_alerta")
+  user         User          @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_alerta_destinatario_usuario")
+  notification Notification?
+
+  @@id([alertId, userId])
+  @@index([userId, assignedAt(sort: Desc)], map: "idx_alerta_destinatario_usuario_atribuicao")
+  @@map("alerta_destinatario")
+}
+
+model Notification {
+  id          BigInt    @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  alertId     BigInt    @map("alerta_id") @db.UnsignedBigInt
+  userId      BigInt    @map("usuario_id") @db.UnsignedBigInt
+  title       String    @map("titulo") @db.VarChar(120)
+  message     String    @map("mensagem") @db.VarChar(500)
+  status      String    @default("PENDENTE") @map("status") @db.VarChar(30)
+  createdAt   DateTime  @default(now()) @map("criada_em") @db.DateTime(3)
+  processedAt DateTime? @map("processada_em") @db.DateTime(3)
+
+  alertRecipient AlertRecipient         @relation(fields: [alertId, userId], references: [alertId, userId], onDelete: Cascade, onUpdate: Restrict, map: "fk_notificacao_alerta_destinatario")
+  deliveries     NotificationDelivery[]
+
+  @@unique([alertId, userId], map: "uq_notificacao_alerta_usuario")
+  @@index([userId, createdAt(sort: Desc)], map: "idx_notificacao_usuario_criacao")
+  @@index([status, createdAt], map: "idx_notificacao_status_criacao")
+  @@map("notificacao")
+}
+
+model NotificationDelivery {
+  id             BigInt    @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  notificationId BigInt    @map("notificacao_id") @db.UnsignedBigInt
+  deviceId       BigInt    @map("dispositivo_id") @db.UnsignedBigInt
+  status         String    @default("PENDENTE") @map("status") @db.VarChar(30)
+  attempts       Int       @default(0) @map("tentativas") @db.UnsignedSmallInt
+  fcmMessageId   String?   @map("fcm_message_id") @db.VarChar(255)
+  errorCode      String?   @map("erro_codigo") @db.VarChar(100)
+  errorDetail    String?   @map("erro_detalhe") @db.VarChar(500)
+  lastAttemptAt  DateTime? @map("ultima_tentativa_em") @db.DateTime(3)
+  sentAt         DateTime? @map("enviada_em") @db.DateTime(3)
+  createdAt      DateTime  @default(now()) @map("criada_em") @db.DateTime(3)
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "fk_entrega_notificacao_notificacao")
+  device       Device       @relation(fields: [deviceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_entrega_notificacao_dispositivo")
+
+  @@unique([notificationId, deviceId], map: "uq_entrega_notificacao_notificacao_dispositivo")
+  @@index([status, lastAttemptAt], map: "idx_entrega_notificacao_status_tentativa")
+  @@map("entrega_notificacao")
+}
+
+model SystemLog {
+  id           BigInt   @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  level        String   @map("nivel") @db.VarChar(20)
+  category     String   @map("categoria") @db.VarChar(50)
+  description  String   @map("descricao") @db.VarChar(500)
+  alertId      BigInt?  @map("alerta_id") @db.UnsignedBigInt
+  monitoringId BigInt?  @map("monitoramento_id") @db.UnsignedBigInt
+  cameraId     BigInt?  @map("camera_id") @db.UnsignedBigInt
+  data         Json?    @map("dados") @db.Json
+  occurredAt   DateTime @default(now()) @map("ocorrido_em") @db.DateTime(3)
+
+  alert      Alert?      @relation(fields: [alertId], references: [id], onDelete: SetNull, onUpdate: Restrict, map: "fk_log_sistema_alerta")
+  monitoring Monitoring? @relation(fields: [monitoringId], references: [id], onDelete: SetNull, onUpdate: Restrict, map: "fk_log_sistema_monitoramento")
+  camera     Camera?     @relation(fields: [cameraId], references: [id], onDelete: SetNull, onUpdate: Restrict, map: "fk_log_sistema_camera")
+
+  @@index([occurredAt], map: "idx_log_sistema_ocorrido")
+  @@index([category, occurredAt], map: "idx_log_sistema_categoria_ocorrido")
+  @@index([alertId], map: "idx_log_sistema_alerta")
+  @@index([monitoringId], map: "idx_log_sistema_monitoramento")
+  @@index([cameraId], map: "idx_log_sistema_camera")
+  @@map("log_sistema")
 }

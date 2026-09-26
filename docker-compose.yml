@@ -1,0 +1,36 @@
+name: poolsafe-backend-dev
+
+# Docker Compose exclusivo para desenvolvimento local do PoolSafe Backend
+# Não utilizar em produção e não publicar na VPS.
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: poolsafe-mysql-dev
+    restart: unless-stopped
+    command:
+      - mysqld
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-poolsafe_dev_root_secret}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-poolsafe}
+      MYSQL_USER: ${MYSQL_USER:-poolsafe_dev}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-poolsafe_dev_password}
+    ports:
+      # Bind estritamente em 127.0.0.1 e porta 3307 no host para evitar conflito com instâncias locais
+      - "127.0.0.1:${MYSQL_PORT:-3307}:3306"
+    volumes:
+      - mysql_dev_data:/var/lib/mysql
+      - ./docker/mysql/init-shadow.sql:/docker-entrypoint-initdb.d/01-init-shadow.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  mysql_dev_data:
+    name: poolsafe_mysql_dev_data
