@@ -236,7 +236,8 @@ Regras:
 | `403` | `ACCESS_DENIED` | ator autenticado sem permissão |
 | `403` | `REAUTHENTICATION_FAILED` | senha da ação sensível inválida |
 | `404` | `RESOURCE_NOT_FOUND` | inexistente ou não revelável ao ator |
-| `409` | `RESOURCE_CONFLICT` | unicidade ou concorrência |
+| `409` | `RESOURCE_CONFLICT` | unicidade ou concorrência genérica |
+| `409` | `ACCOUNT_CANNOT_BE_CREATED` | conflito de e-mail no cadastro de conta |
 | `409` | `MONITORING_STATE_CONFLICT` | composição ou transição incompatível |
 | `410` | `EVIDENCE_UNAVAILABLE` | evidência conhecida, porém expirada ou removida |
 | `413` | `PAYLOAD_TOO_LARGE` | limite excedido |

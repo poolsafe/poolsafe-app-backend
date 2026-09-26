@@ -37,4 +37,23 @@ export class EnvConfig {
   @IsInt()
   @Min(1)
   THROTTLE_TTL_SECONDS: number = 60;
+
+  /**
+   * Chave RSA privada codificada em Base64 para assinatura RS256 dos Access Tokens.
+   */
+  @IsString()
+  JWT_PRIVATE_KEY_BASE64!: string;
+
+  /**
+   * Chave RSA pública codificada em Base64 para verificação RS256 dos Access Tokens.
+   */
+  @IsString()
+  JWT_PUBLIC_KEY_BASE64!: string;
+
+  /**
+   * Identificador do emissor (iss) do token JWT.
+   */
+  @IsString()
+  JWT_ISSUER: string = 'poolsafe-api';
 }
+

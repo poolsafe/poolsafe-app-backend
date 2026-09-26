@@ -8,6 +8,8 @@ import { validateSync } from 'class-validator';
 import { EnvConfig } from './config/env.validation.js';
 import { PrismaModule } from './database/prisma.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { AuthModule } from './modules/auth/auth.module.js';
+import { UsersModule } from './modules/users/users.module.js';
 
 function validateEnv(config: Record<string, unknown>): EnvConfig {
   const validated = plainToInstance(EnvConfig, config, {
@@ -55,6 +57,9 @@ function validateEnv(config: Record<string, unknown>): EnvConfig {
 
     PrismaModule,
     HealthModule,
+    AuthModule,
+    UsersModule,
   ],
 })
 export class AppModule {}
+

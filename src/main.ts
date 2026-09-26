@@ -10,6 +10,39 @@ import { randomUUID } from 'node:crypto';
 
 import { AppModule } from './app.module.js';
 import { ProblemDetailsFilter } from './common/filters/problem-details.filter.js';
+import {
+  ProblemDetailsException,
+  ProblemErrorItem,
+} from './common/errors/problem-details.exception.js';
+
+function formatValidationErrors(
+  errors: import('class-validator').ValidationError[],
+  parent = '',
+): ProblemErrorItem[] {
+  const result: ProblemErrorItem[] = [];
+  for (const err of errors) {
+    const pointer = `${parent}/${err.property}`;
+    if (err.constraints) {
+      for (const [key, msg] of Object.entries(err.constraints)) {
+        let code = 'INVALID_FIELD';
+        if (key === 'isEmail') code = 'INVALID_EMAIL';
+        else if (key === 'isNotEmpty') code = 'REQUIRED_FIELD';
+        else if (key === 'minLength') code = 'FIELD_TOO_SHORT';
+        else if (key === 'maxLength') code = 'FIELD_TOO_LONG';
+        else if (key === 'whitelistValidation') code = 'UNKNOWN_FIELD';
+        result.push({
+          pointer,
+          code,
+          detail: msg,
+        });
+      }
+    }
+    if (err.children && err.children.length > 0) {
+      result.push(...formatValidationErrors(err.children, pointer));
+    }
+  }
+  return result;
+}
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -28,14 +61,16 @@ async function bootstrap(): Promise<void> {
   app.use(
     (
       req: import('express').Request,
-      _res: import('express').Response,
+      res: import('express').Response,
       next: import('express').NextFunction,
     ) => {
       const existing = req.headers['x-request-id'];
-      req.headers['x-request-id'] =
+      const requestId =
         typeof existing === 'string' && existing.length > 0
           ? existing
           : randomUUID();
+      req.headers['x-request-id'] = requestId;
+      res.setHeader('X-Request-Id', requestId);
       next();
     },
   );
@@ -51,6 +86,16 @@ async function bootstrap(): Promise<void> {
       forbidNonWhitelisted: true,
       transform: true,
       errorHttpStatusCode: 422,
+      exceptionFactory: (errors) => {
+        const formatted = formatValidationErrors(errors);
+        return new ProblemDetailsException({
+          status: 422,
+          code: 'VALIDATION_ERROR',
+          title: 'Dados inválidos',
+          detail: 'Um ou mais campos precisam ser corrigidos.',
+          errors: formatted,
+        });
+      },
     }),
   );
 

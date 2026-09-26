@@ -108,13 +108,14 @@ Mantém a sessão renovável definida pelo contrato da API. O access token é um
 | `id` | `BIGINT UNSIGNED` | não | PK |
 | `usuario_id` | `BIGINT UNSIGNED` | não | FK para `usuario` |
 | `dispositivo_id` | `BIGINT UNSIGNED` | sim | FK para `dispositivo` |
-| `token_hash` | `CHAR(64)` | não | hash SHA-256 do segredo do refresh token; único |
+| `token_hash` | `CHAR(64)` | não | hash SHA-256 do segredo do refresh token atual; único |
+| `token_hash_anterior` | `CHAR(64)` | sim | hash SHA-256 do refresh token imediatamente anterior; detecta reutilização |
 | `expira_em` | `DATETIME(3)` | não | validade absoluta da sessão, inicialmente 30 dias |
 | `ultimo_uso_em` | `DATETIME(3)` | sim | última rotação bem-sucedida |
 | `revogada_em` | `DATETIME(3)` | sim | logout, troca de senha ou revogação |
 | `criado_em` | `DATETIME(3)` | não | UTC |
 
-O valor utilizável do refresh token é entregue ao cliente apenas na criação ou rotação. O banco guarda somente o hash. O `sessionId` identificável no formato do token permite localizar a linha; o segredo é comparado com segurança. Reutilização de segredo anterior revoga a sessão.
+O valor utilizável do refresh token é entregue ao cliente apenas na criação ou rotação. O banco guarda somente o hash atual e o hash imediatamente anterior (`token_hash_anterior`). O `sessionId` identificável no formato do token permite localizar a linha; o segredo é comparado com segurança. Reutilização comprovada do segredo imediatamente anterior revoga a sessão, enquanto tokens forjados ou nunca emitidos são rejeitados sem afetar a sessão legítima.
 
 ### 5.3 `token_recuperacao_senha`
 
