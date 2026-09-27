@@ -20,6 +20,7 @@
     "test:integration": "node --experimental-strip-types --test --test-concurrency=1 \"test/integration/**/*.test.ts\"",
     "prisma:validate": "prisma validate",
     "prisma:generate": "prisma generate",
+    "seed:home": "node --experimental-strip-types scripts/seed-home-dev.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

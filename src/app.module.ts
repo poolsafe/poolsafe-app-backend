@@ -10,6 +10,7 @@ import { PrismaModule } from './database/prisma.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { UsersModule } from './modules/users/users.module.js';
+import { HomeModule } from './modules/home/home.module.js';
 
 function validateEnv(config: Record<string, unknown>): EnvConfig {
   const validated = plainToInstance(EnvConfig, config, {
@@ -66,6 +67,7 @@ function validateEnv(config: Record<string, unknown>): EnvConfig {
     HealthModule,
     AuthModule,
     UsersModule,
+    HomeModule,
   ],
 })
 export class AppModule {}
