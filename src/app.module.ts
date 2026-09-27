@@ -51,7 +51,14 @@ function validateEnv(config: Record<string, unknown>): EnvConfig {
           process.env['NODE_ENV'] !== 'production'
             ? { target: 'pino-pretty' }
             : undefined,
-        redact: ['req.headers.authorization', 'req.headers.cookie'],
+        redact: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'req.body.password',
+          'req.body.currentPassword',
+          'req.body.newPassword',
+          'req.body.refreshToken',
+        ],
       },
     }),
 

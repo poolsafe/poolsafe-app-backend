@@ -120,3 +120,15 @@ export class MalformedRequestException extends ProblemDetailsException {
     });
   }
 }
+
+export class ReauthenticationFailedException extends ProblemDetailsException {
+  constructor(detail = 'A senha atual informada está incorreta.') {
+    super({
+      status: HttpStatus.FORBIDDEN,
+      code: 'REAUTHENTICATION_FAILED',
+      title: 'Falha na reautenticação',
+      detail,
+    });
+  }
+}
+
