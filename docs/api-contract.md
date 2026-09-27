@@ -616,7 +616,7 @@ Retorna `200 OK` com todas as câmeras de acesso ativo do usuário. Não usa pag
 
 ### 15.3 `GET /cameras/{cameraId}`
 
-Retorna a câmera, sua sessão atual e até cinco alertas recentes dos quais o usuário foi destinatário. IP, protocolo, stream e credenciais nunca são retornados.
+Retorna a câmera, sua sessão atual e até 30 alertas recentes dos quais o usuário foi destinatário. IP, protocolo, stream e credenciais nunca são retornados.
 
 Sem acesso ativo, retorna `404 RESOURCE_NOT_FOUND`.
 

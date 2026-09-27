@@ -1,4 +1,4 @@
-import { IsEnum, IsInt, IsString, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export enum AppEnvironment {
   Development = 'development',
@@ -55,5 +55,14 @@ export class EnvConfig {
    */
   @IsString()
   JWT_ISSUER: string = 'poolsafe-api';
+
+  /**
+   * Janela máxima sem comunicação para considerar a câmera online (em segundos).
+   * Padrão: 90 segundos.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  CAMERA_OFFLINE_THRESHOLD_SECONDS: number = 90;
 }
 

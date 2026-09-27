@@ -21,6 +21,7 @@
     "prisma:validate": "prisma validate",
     "prisma:generate": "prisma generate",
     "seed:home": "node --experimental-strip-types scripts/seed-home-dev.ts",
+    "seed:cameras": "node --experimental-strip-types scripts/seed-cameras-dev.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

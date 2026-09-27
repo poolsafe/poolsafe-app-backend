@@ -132,3 +132,14 @@ export class ReauthenticationFailedException extends ProblemDetailsException {
   }
 }
 
+export class ResourceNotFoundException extends ProblemDetailsException {
+  constructor(detail = 'Recurso não encontrado ou inexistente.') {
+    super({
+      status: HttpStatus.NOT_FOUND,
+      code: 'RESOURCE_NOT_FOUND',
+      title: 'Recurso não encontrado',
+      detail,
+    });
+  }
+}
+

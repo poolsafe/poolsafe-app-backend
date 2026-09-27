@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service.js';
 import type {
   HomeResponse,
@@ -8,39 +9,23 @@ import type {
   LatestAlert,
   WarningItem,
 } from './dto/home-response.dto.js';
+import {
+  DEFAULT_CAMERA_OFFLINE_THRESHOLD_MS,
+  calculateCameraConnectionState,
+  type CameraConnectionState,
+} from '../cameras/camera-connectivity.util.js';
 
-export const CAMERA_OFFLINE_THRESHOLD_MS = 90_000;
-
-export type CameraConnectionState =
-  | 'ONLINE'
-  | 'OFFLINE'
-  | 'DESCONHECIDA'
-  | 'INATIVA';
-
-export function calculateCameraConnectionState(
-  camera: {
-    administrativeStatus: string;
-    lastCommunicationAt: Date | null;
-  },
-  now: Date,
-): CameraConnectionState {
-  if (camera.administrativeStatus !== 'ATIVA') {
-    return 'INATIVA';
-  }
-  if (!camera.lastCommunicationAt) {
-    return 'DESCONHECIDA';
-  }
-  if (now.getTime() - camera.lastCommunicationAt.getTime() <= CAMERA_OFFLINE_THRESHOLD_MS) {
-    return 'ONLINE';
-  }
-  return 'OFFLINE';
-}
+export const CAMERA_OFFLINE_THRESHOLD_MS = DEFAULT_CAMERA_OFFLINE_THRESHOLD_MS;
+export { calculateCameraConnectionState, type CameraConnectionState };
 
 @Injectable()
 export class HomeService {
   private readonly logger = new Logger(HomeService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {}
 
   /**
    * Obtém o resumo consolidado da Home para o usuário autenticado.
@@ -55,6 +40,9 @@ export class HomeService {
     const prisma = this.prisma.getClient();
     const userBigInt = BigInt(userIdStr);
     const now = new Date();
+    const thresholdSeconds =
+      this.configService.get<number>('CAMERA_OFFLINE_THRESHOLD_SECONDS') ?? 90;
+    const thresholdMs = thresholdSeconds * 1000;
 
     // 1. Câmeras com acesso ativo do usuário
     const cameraAccesses = await prisma.cameraAccess.findMany({
@@ -88,7 +76,7 @@ export class HomeService {
     >();
 
     for (const access of cameraAccesses) {
-      const state = calculateCameraConnectionState(access.camera, now);
+      const state = calculateCameraConnectionState(access.camera, now, thresholdMs);
       cameraMap.set(access.camera.id.toString(), {
         camera: access.camera,
         connectionState: state,
@@ -173,7 +161,7 @@ export class HomeService {
           let sessionOnlineCameras = 0;
 
           for (const cam of sessionCameras) {
-            const state = calculateCameraConnectionState(cam, now);
+            const state = calculateCameraConnectionState(cam, now, thresholdMs);
             if (state === 'ONLINE') {
               sessionOnlineCameras++;
             }

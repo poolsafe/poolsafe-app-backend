@@ -2,8 +2,8 @@
 
 > Documento técnico canônico para orientar o desenvolvimento, a integração e a documentação do PoolSafe.
 
-**Última consolidação:** 26 de setembro de 2026  
-**Escopo desta versão:** arquitetura geral, infraestrutura existente, mensageria, aplicativo mobile, API Node.js, persistência MySQL e estado das fatias de implementação.
+**Última consolidação:** 27 de setembro de 2026  
+**Escopo desta versão:** arquitetura geral, infraestrutura existente, mensageria, aplicativo mobile, API Node.js, persistência MySQL, conectividade das câmeras e estado das fatias de implementação.
 
 ## 1. Finalidade e uso
 
@@ -53,10 +53,10 @@ O PoolSafe constitui uma camada adicional de segurança. Ele não substitui supe
 
 ## 3. Repositórios e estado atual
 
-| Repositório | Responsabilidade | Estado em 26/09/2026 |
+| Repositório | Responsabilidade | Estado em 27/09/2026 |
 |---|---|---|
-| `poolsafe-app-frontend` | Aplicativo mobile React Native | Bootstrap, identidade visual, navegação, cadastro, login, restauração de sessão, renovação segura e logout implementados e validados no Android |
-| `poolsafe-app-backend` | API Node.js consumida pelo aplicativo | Bootstrap, Prisma, migrations, banco local, autenticação e sessão implementados e validados |
+| `poolsafe-app-frontend` | Aplicativo mobile React Native | Bootstrap, identidade visual, navegação, autenticação, conta e Home implementados e validados no Android |
+| `poolsafe-app-backend` | API Node.js consumida pelo aplicativo | Bootstrap, Prisma, migrations, banco local, autenticação, sessão, conta e Home implementados e validados |
 
 O backend Python de visão computacional é um projeto independente. Ele integra a arquitetura geral, mas não pertence aos repositórios do aplicativo e da API.
 
@@ -95,6 +95,7 @@ flowchart TD
 Os fluxos permanecem separados:
 
 - **Detecção e alerta:** câmera → gateway → Cloudflare → backend Python → RabbitMQ → N8N → MySQL/FCM → aplicativo;
+- **Conectividade da câmera:** frame confirmado no Python → heartbeat no RabbitMQ → N8N → atualização de `ultima_comunicacao_em` no MySQL → cálculo pela API;
 - **Aplicação:** aplicativo → API Node.js → MySQL;
 - **E-mail transacional:** aplicativo → API Node.js → Resend → caixa de e-mail do usuário.
 
@@ -124,6 +125,25 @@ Usos previstos:
 
 **Estado:** decidido, ainda não implementado. A ativação depende da liberação do benefício do domínio, da configuração DNS e da validação do domínio no Resend. O cadastro atualmente implementado ainda não envia mensagem de confirmação nem exige verificação de e-mail. Contrato, estado do usuário e fluxo de confirmação deverão ser revisados antes dessa funcionalidade entrar em produção.
 
+### 4.3 Heartbeat e conectividade das câmeras
+
+O estado de conexão da câmera permanece calculado, e não persistido. O MySQL mantém somente `camera.ultima_comunicacao_em`; a API compara esse instante com a janela operacional configurável de 90 segundos:
+
+- `DESCONHECIDA`: a câmera nunca comunicou ou a referência não é confiável;
+- `ONLINE`: a última comunicação ocorreu dentro da janela;
+- `OFFLINE`: a câmera está administrativamente ativa e ultrapassou a janela;
+- `INATIVA`: condição administrativa separada da conectividade.
+
+**Decisão arquitetural:** o Python deverá publicar no RabbitMQ um heartbeat periódico por câmera, inicialmente a cada aproximadamente 30 segundos, somente quando houver confirmação real de captura ou decodificação do stream. O N8N continuará como orquestrador e atualizará `ultima_comunicacao_em` no MySQL, respeitando a regra de que esse instante somente avança.
+
+O heartbeat deverá continuar mesmo quando o monitoramento estiver pausado. A pausa interrompe a análise de risco, não a verificação de disponibilidade da câmera. Mensagens atrasadas não podem reclassificar uma câmera como online; o consumidor deverá considerar o instante real de observação e rejeitar heartbeats antigos ou inválidos.
+
+Não é necessário gravar uma transição para `OFFLINE` nem executar rotina periódica apenas para a consulta do estado. A API deriva o resultado no momento da requisição. Um watchdog agendado no N8N seria necessário somente para gerar notificações proativas de indisponibilidade.
+
+**Decisão de escopo do MVP:** indisponibilidade de câmera será comunicada pela Home e pelas telas de câmeras. Push de câmera offline não será implementado nesta etapa. As notificações FCM continuam destinadas a possíveis situações de risco. Uma futura notificação operacional exigirá controle de transição e deduplicação, além de revisão do modelo atual, no qual `notificacao` está vinculada a um alerta.
+
+**Estado:** arquitetura decidida; implementação pendente para o checkpoint do pipeline Python, RabbitMQ e N8N.
+
 ## 5. Fronteiras obrigatórias
 
 1. O aplicativo acessa dados do PoolSafe exclusivamente pela API Node.js.
@@ -132,7 +152,7 @@ Usos previstos:
 4. O Firebase Cloud Messaging é utilizado para push, não como banco da aplicação.
 5. Firestore e Firebase Realtime Database não fazem parte da arquitetura.
 6. O backend Python e a API Node.js são sistemas distintos.
-7. O backend Python publica eventos no RabbitMQ; o N8N os consome e orquestra o fluxo de alerta.
+7. O backend Python publica eventos de risco e heartbeats no RabbitMQ; o N8N os consome e orquestra os fluxos internos correspondentes.
 8. E-mails de conta devem partir de um fluxo controlado pela API, sem expor credenciais do provedor ao aplicativo.
 9. Serviços internos devem utilizar redes e interfaces controladas.
 10. Contratos ou campos não definidos não devem ser inventados durante a implementação.
@@ -141,7 +161,7 @@ Usos previstos:
 
 ### 6.1 Aplicativo mobile
 
-**Estado:** Fatias 1 e 2 concluídas para o ambiente local Android.
+**Estado:** Fatias 1, 2, 3A e 4 concluídas para o ambiente local Android.
 
 Implementado e validado:
 
@@ -158,14 +178,18 @@ Implementado e validado:
 - proteção contra retorno indevido a telas autenticadas;
 - tratamento de Problem Details e erros de campos;
 - validação do formulário com teclado virtual em tela compacta;
-- testes automatizados do fluxo de autenticação e auditoria de logs.
+- testes automatizados do fluxo de autenticação e auditoria de logs;
+- consulta e alteração do nome do perfil;
+- alteração autenticada de senha com preservação da sessão atual;
+- tela de conta integrada à API;
+- Home autenticada com estado de monitoramento, resumo de câmeras, avisos, sincronização e alerta recente;
+- diferenciação entre carregamento, vazio, erro sem dados e dados anteriores desatualizados;
+- atualização manual da Home e validação de seus cenários com seeds do Prisma.
 
 Ainda pendente:
 
 - recuperação de senha;
 - confirmação de e-mail;
-- edição de perfil e alteração de senha;
-- dados reais da Home;
 - câmeras, monitoramento e alertas;
 - registro de dispositivo e FCM Token;
 - notificações em foreground, background e aplicativo encerrado;
@@ -173,7 +197,7 @@ Ainda pendente:
 
 ### 6.2 API Node.js
 
-**Estado:** persistência inicial, autenticação e sessão implementadas localmente.
+**Estado:** persistência inicial, autenticação, sessão, conta e Home implementadas localmente.
 
 A API utiliza Node.js 24 LTS, TypeScript, NestJS, Prisma 7 e MySQL 8.4. Estão implementados:
 
@@ -189,6 +213,9 @@ A API utiliza Node.js 24 LTS, TypeScript, NestJS, Prisma 7 e MySQL 8.4. Estão i
 - refresh token opaco, rotativo e com validade absoluta de 30 dias;
 - consulta de usuário e sessão em toda rota protegida;
 - `GET /api/v1/users/me`;
+- `PATCH /api/v1/users/me`;
+- `PUT /api/v1/users/me/password`;
+- `GET /api/v1/home`;
 - logout com revogação imediata;
 - Argon2id para senhas;
 - proteção contra enumeração de conta;
@@ -202,9 +229,15 @@ Rotas atualmente implementadas para identidade:
 - `POST /api/v1/auth/login`;
 - `POST /api/v1/auth/refresh`;
 - `POST /api/v1/auth/logout`;
-- `GET /api/v1/users/me`.
+- `GET /api/v1/users/me`;
+- `PATCH /api/v1/users/me`;
+- `PUT /api/v1/users/me/password`.
 
-Recuperação de senha, confirmação de e-mail e os demais módulos funcionais continuam pendentes.
+Rota funcional implementada após identidade:
+
+- `GET /api/v1/home`.
+
+Recuperação de senha, confirmação de e-mail e os demais módulos funcionais continuam pendentes. A Fatia 3 foi dividida operacionalmente: a Fatia 3A de conta autenticada está concluída, enquanto a Fatia 3B de recuperação aguarda domínio e Resend.
 
 ### 6.3 Backend Python de visão computacional
 
@@ -219,7 +252,10 @@ Responsabilidades:
 - aplicar persistência temporal;
 - consolidar eventos de risco;
 - publicar eventos no RabbitMQ;
+- publicar heartbeat periódico por câmera quando houver captura confirmada;
 - tratar perda e reconexão do stream sem interromper permanentemente o serviço.
+
+A verificação de conectividade deverá permanecer ativa mesmo quando a análise de risco estiver pausada. Um erro explícito do stream pode produzir um evento técnico para diagnóstico rápido, mas não substitui a inferência por ausência de heartbeat, necessária também para cobrir falhas do próprio processo Python ou de componentes intermediários.
 
 O critério inicial do protótipo considera confirmação da mesma pessoa em situação de risco durante cinco frames consecutivos, com limiar inicial de confiança de 60%. Esses valores dependem de validação experimental.
 
@@ -227,7 +263,7 @@ O critério inicial do protótipo considera confirmação da mesma pessoa em sit
 
 **Estado:** componente aprovado e pendente de implantação.
 
-O RabbitMQ será o broker de mensagens entre Python e N8N. A confirmação de publicação, consumo, retries, idempotência e tratamento de mensagens problemáticas deverá ser definida em conjunto com o contrato do evento de visão.
+O RabbitMQ será o broker de mensagens entre Python e N8N. Deverá transportar, por rotas ou tipos distintos, eventos duráveis de risco e heartbeats de curta validade. A confirmação de publicação, consumo, retries, idempotência e tratamento de mensagens problemáticas deverá ser definida em conjunto com os contratos internos. Heartbeats antigos não devem permanecer em backlog a ponto de produzir um estado online incorreto.
 
 ### 6.5 N8N
 
@@ -237,6 +273,7 @@ O N8N deverá:
 
 - consumir eventos do RabbitMQ;
 - validar o payload;
+- consumir heartbeats e avançar `camera.ultima_comunicacao_em` de maneira monotônica;
 - persistir alertas e registros relacionados;
 - localizar destinatários e dispositivos;
 - solicitar ao FCM o envio das notificações;
@@ -284,6 +321,8 @@ Na VPS já existem o container MySQL, o banco `poolsafe`, o usuário restrito, o
 **Estado:** tecnologia decidida; integração pendente.
 
 O FCM será usado exclusivamente para push. O aplicativo deverá registrar a instalação e o token pela API, atualizar o vínculo quando o token mudar e tratar abertura de alertas nos diferentes estados do app.
+
+No escopo atual do MVP, o FCM notificará possíveis situações de risco. Indisponibilidade de câmera será apresentada nas consultas da Home e de câmeras, sem push operacional. Essa decisão evita representar falha técnica como alerta de detecção e evita ampliar o schema antes de existir um modelo de incidente e deduplicação.
 
 ### 6.8 Gateway Orange Pi e Cloudflare
 
@@ -340,6 +379,7 @@ A câmera antiga demonstra a viabilidade da conectividade privada, mas não subs
 | Acesso à câmera | Autorização entre usuário e câmera |
 | Monitoramento | Sessão que agrupa uma ou várias câmeras |
 | Evento de visão | Mensagem técnica publicada pelo Python no RabbitMQ |
+| Heartbeat de câmera | Confirmação técnica periódica de que o stream foi capturado pelo Python |
 | Alerta | Possível risco confirmado pelas regras do pipeline |
 | Destinatário | Usuário autorizado no instante da detecção |
 | Evidência | Frame associado à detecção |
@@ -376,6 +416,15 @@ A câmera antiga demonstra a viabilidade da conectividade privada, mas não subs
 5. O N8N solicita o envio ao FCM.
 6. O aplicativo recebe a notificação.
 7. Ao abrir, o app consulta o conteúdo autorizado pela API.
+
+### 9.4 Heartbeat e estado de conexão — arquitetura decidida
+
+1. O Python captura ou decodifica com sucesso um frame da câmera.
+2. Em intervalo controlado, publica no RabbitMQ um heartbeat com o código estável da câmera e o instante real da observação.
+3. O N8N valida a mensagem e descarta conteúdo inválido ou antigo.
+4. O N8N localiza a câmera por `codigo_integracao` e avança `ultima_comunicacao_em` sem permitir regressão temporal.
+5. Ao consultar Home ou câmeras, a API compara a última comunicação com a janela de 90 segundos.
+6. O aplicativo recebe `ONLINE`, `OFFLINE` ou `DESCONHECIDA` pela API e nunca consulta Python, N8N ou banco diretamente.
 
 ## 10. Stack do aplicativo
 
@@ -445,6 +494,7 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 8. Produzir alterações pequenas, testadas e revisáveis.
 9. Distinguir claramente implementado, simulado e planejado.
 10. Parar quando uma ambiguidade afetar arquitetura, segurança ou dados.
+11. Testes automatizados, integração, typecheck, lint e build ficam sob responsabilidade do agente; a validação visual e de usabilidade no Android é realizada pelo responsável pelo projeto, salvo diagnóstico nativo ou solicitação explícita.
 
 ## 15. Estado das fatias verticais
 
@@ -453,8 +503,8 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 | Bootstrap técnico | Concluído |
 | Identidade visual e componentes fundamentais | Concluída |
 | Persistência, cadastro, login e sessão | Concluída localmente de ponta a ponta |
-| Recuperação de acesso e conta | Próxima; depende parcialmente do serviço de e-mail |
-| Home | Pendente |
+| Recuperação de acesso e conta | Parcial: Fatia 3A concluída; Fatia 3B aguarda domínio e Resend |
+| Home | Concluída localmente de ponta a ponta |
 | Câmeras | Pendente |
 | Monitoramento | Pendente |
 | Histórico e detalhes de alerta | Pendente |
@@ -469,8 +519,7 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 
 - recuperação de senha;
 - confirmação de e-mail quando domínio e Resend estiverem disponíveis;
-- perfil e alteração de senha;
-- Home, câmeras, monitoramento e alertas;
+- câmeras, monitoramento e alertas;
 - FCM e notificações.
 
 ### API e dados
@@ -485,7 +534,9 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 ### Pipeline de detecção
 
 - implantação do RabbitMQ;
-- contrato definitivo do evento Python → RabbitMQ → N8N;
+- contrato definitivo dos eventos de risco e heartbeat Python → RabbitMQ → N8N;
+- publicação periódica de heartbeat pelo Python;
+- workflow do N8N para atualizar `camera.ultima_comunicacao_em`;
 - workflow definitivo do N8N;
 - integração FCM;
 - câmera RTSP e testes de latência;
@@ -503,5 +554,7 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 - `app-requirements.md`;
 - `design-system.md`;
 - `PoolSafe_Plano_de_Fatias_Verticais.md`;
+- `Poolsafe_Processos_Pendentes_Mapeados-ATUALIZADO_27-09-2026.md`;
 - relatórios de conclusão das Etapas 2A, 2B e 2C;
-- decisões confirmadas até 26 de setembro de 2026.
+- relatórios de conclusão das Fatias 3A e 4;
+- decisões confirmadas até 27 de setembro de 2026.
