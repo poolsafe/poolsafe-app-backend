@@ -9,6 +9,7 @@ interface MariaDbPoolConfig {
   password?: string;
   database?: string;
   connectionLimit: number;
+  allowPublicKeyRetrieval?: boolean;
 }
 
 function parseDatabaseUrl(rawUrl: string): MariaDbPoolConfig {
@@ -36,6 +37,7 @@ function parseDatabaseUrl(rawUrl: string): MariaDbPoolConfig {
     password,
     database,
     connectionLimit: 5,
+    allowPublicKeyRetrieval: true,
   };
 }
 

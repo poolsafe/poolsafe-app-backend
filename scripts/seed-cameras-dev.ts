@@ -13,6 +13,7 @@ function parseDatabaseUrl(rawUrl: string) {
     password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
     database: parsed.pathname.replace(/^\/+/, '') || undefined,
     connectionLimit: 5,
+    allowPublicKeyRetrieval: true,
   };
 }
 

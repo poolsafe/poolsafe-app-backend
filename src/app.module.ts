@@ -60,6 +60,7 @@ function validateEnv(config: Record<string, unknown>): EnvConfig {
           'req.body.currentPassword',
           'req.body.newPassword',
           'req.body.refreshToken',
+          'req.body.token',
         ],
       },
     }),

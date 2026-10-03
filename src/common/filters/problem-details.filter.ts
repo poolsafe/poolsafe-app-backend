@@ -10,6 +10,7 @@ import type { Request, Response } from 'express';
 import {
   ProblemDetailsException,
   ProblemErrorItem,
+  RateLimitedException,
 } from '../errors/problem-details.exception.js';
 
 function toKebabCase(str: string): string {
@@ -161,6 +162,10 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       requestId,
       ...(errors && errors.length > 0 ? { errors } : {}),
     };
+
+    if (exception instanceof RateLimitedException && exception.retryAfterSeconds !== undefined) {
+      response.setHeader('Retry-After', exception.retryAfterSeconds.toString());
+    }
 
     response
       .status(status)

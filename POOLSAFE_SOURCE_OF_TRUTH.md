@@ -2,8 +2,8 @@
 
 > Documento técnico canônico para orientar o desenvolvimento, a integração e a documentação do PoolSafe.
 
-**Última consolidação:** 27 de setembro de 2026  
-**Escopo desta versão:** arquitetura geral, infraestrutura existente, mensageria, aplicativo mobile, API Node.js, persistência MySQL, conectividade das câmeras e estado das fatias de implementação.
+**Última consolidação:** 3 de outubro de 2026 — 15h  
+**Escopo desta versão:** arquitetura geral, domínio público e camada Cloudflare, infraestrutura existente, mensageria, aplicativo mobile, API Node.js, e-mail transacional, persistência MySQL, conectividade das câmeras e estado das fatias de implementação.
 
 ## 1. Finalidade e uso
 
@@ -49,14 +49,17 @@ O PoolSafe constitui uma camada adicional de segurança. Ele não substitui supe
 - desacoplar a produção e o consumo de eventos de detecção;
 - registrar eventos, evidências, destinatários e alertas;
 - entregar notificações push;
+- oferecer uma presença pública segura para apresentação do projeto;
+- enviar e-mails transacionais de conta por domínio próprio;
 - permitir que o usuário gerencie conta, sessão, monitoramento e histórico pelo aplicativo.
 
 ## 3. Repositórios e estado atual
 
-| Repositório | Responsabilidade | Estado em 27/09/2026 |
+| Repositório | Responsabilidade | Estado em 03/10/2026 |
 |---|---|---|
-| `poolsafe-app-frontend` | Aplicativo mobile React Native | Bootstrap, identidade visual, navegação, autenticação, conta e Home implementados e validados no Android |
-| `poolsafe-app-backend` | API Node.js consumida pelo aplicativo | Bootstrap, Prisma, migrations, banco local, autenticação, sessão, conta e Home implementados e validados |
+| `poolsafe-app-frontend` | Aplicativo mobile React Native | Bootstrap, identidade visual, navegação, autenticação, conta, recuperação de senha, Home e câmeras implementados e validados no Android |
+| `poolsafe-app-backend` | API Node.js consumida pelo aplicativo | Bootstrap, Prisma, migrations, banco local, autenticação, sessão, conta, recuperação de senha com Resend, Home e câmeras implementados e validados |
+| `poolsafe-landing-page` | Apresentação pública do projeto | Landing page estática implementada, publicada em Cloudflare Workers e disponível em `https://poolsafe.app` |
 
 O backend Python de visão computacional é um projeto independente. Ele integra a arquitetura geral, mas não pertence aos repositórios do aplicativo e da API.
 
@@ -71,14 +74,17 @@ Também permanecem separados:
 
 ## 4. Arquitetura vigente
 
-O sistema está dividido em três ambientes:
+O sistema está dividido em quatro contextos principais:
 
 1. **Residência:** câmera Wi-Fi e Orange Pi Zero 3;
-2. **Nuvem:** Cloudflare, VPS Contabo, processamento, mensageria, orquestração, API e banco;
-3. **Dispositivo do usuário:** aplicativo React Native e entrega de mensagens pelo Firebase Cloud Messaging.
+2. **Borda e domínio público:** Cloudflare como DNS autoritativo, camada HTTPS/TLS, proxy, hospedagem da landing page, redirecionamentos e conectividade privada por Tunnel;
+3. **Nuvem de aplicação:** VPS Contabo, processamento, mensageria, orquestração, API e banco;
+4. **Dispositivo do usuário:** aplicativo React Native e entrega de mensagens pelo Firebase Cloud Messaging.
 
 ```mermaid
 flowchart TD
+    WEB["Navegador"] --> EDGE["Cloudflare DNS / HTTPS"]
+    EDGE --> SITE["Landing page / Worker"]
     CAM["Câmera Wi-Fi"] --> GW["Orange Pi / Gateway"]
     GW --> CF["Cloudflare Tunnel"]
     CF --> PY["Backend Python / Visão"]
@@ -90,6 +96,7 @@ flowchart TD
     APP --> API["API Node.js"]
     API --> DB
     API --> EMAIL["Resend / E-mail transacional"]
+    EMAIL --> MAIL["Caixa de e-mail"]
 ```
 
 Os fluxos permanecem separados:
@@ -97,9 +104,30 @@ Os fluxos permanecem separados:
 - **Detecção e alerta:** câmera → gateway → Cloudflare → backend Python → RabbitMQ → N8N → MySQL/FCM → aplicativo;
 - **Conectividade da câmera:** frame confirmado no Python → heartbeat no RabbitMQ → N8N → atualização de `ultima_comunicacao_em` no MySQL → cálculo pela API;
 - **Aplicação:** aplicativo → API Node.js → MySQL;
-- **E-mail transacional:** aplicativo → API Node.js → Resend → caixa de e-mail do usuário.
+- **E-mail transacional:** aplicativo → API Node.js → Resend → caixa de e-mail do usuário;
+- **Apresentação pública:** navegador → Cloudflare DNS/HTTPS → landing page estática em Worker.
 
-### 4.1 Estado da mensageria RabbitMQ
+### 4.1 Camada Cloudflare e domínio público
+
+O domínio `poolsafe.app` foi obtido na Name.com e utiliza nameservers da Cloudflare. A Cloudflare passou a concentrar o DNS autoritativo do domínio e ampliou seu papel no projeto para além do Tunnel já utilizado na rede residencial.
+
+Responsabilidades atualmente implementadas:
+
+- gerenciamento dos registros DNS de `poolsafe.app`;
+- emissão e renovação automática de certificados TLS para os hostnames públicos;
+- publicação da landing page estática em Cloudflare Workers com domínio personalizado;
+- atendimento canônico da landing page em `https://poolsafe.app`;
+- redirecionamento permanente de `https://www.poolsafe.app` para o domínio sem `www`, preservando caminho e parâmetros;
+- registros DNS de autenticação do Resend para o subdomínio `send.poolsafe.app`;
+- transporte privado entre a VPS e a rede residencial por Cloudflare Tunnel e WARP.
+
+A landing page possui finalidade institucional e acadêmica: apresentar o PoolSafe como projeto de TCC ainda em desenvolvimento. Ela não hospeda a API, não acessa o banco e não participa dos fluxos internos de monitoramento.
+
+O HTTPS público é fornecido pela Cloudflare. Não foi adquirido certificado SSL separado na registradora. Novos subdomínios poderão ser direcionados a aplicações futuras por DNS, Worker ou Cloudflare Tunnel, conforme a natureza do serviço; isso não implica exposição direta de portas da VPS.
+
+**Estado:** DNS, HTTPS, landing page, domínio raiz e redirecionamento `www` implementados e validados. DNSSEC permanece como endurecimento futuro opcional. A publicação de serviços administrativos, como N8N, em subdomínio protegido ainda não foi realizada.
+
+### 4.2 Estado da mensageria RabbitMQ
 
 O RabbitMQ foi aprovado como intermediário entre o backend Python e o N8N. Essa decisão substitui, na arquitetura-alvo, o acoplamento direto por HTTP entre o produtor de visão computacional e o workflow de orquestração.
 
@@ -113,9 +141,9 @@ Objetivos da adoção:
 
 **Estado:** decidido, ainda não implementado. Permanecem pendentes instalação, topologia de exchange/queue, política de confirmação, retries, dead-letter queue, segurança e testes. O broker deverá permanecer interno à infraestrutura e não deve ser exposto publicamente.
 
-### 4.2 Estado do serviço de e-mail
+### 4.3 Estado do serviço de e-mail
 
-O provedor escolhido para e-mails transacionais é o **Resend**, associado a um domínio próprio a ser obtido por meio do GitHub Education.
+O provedor de e-mails transacionais é o **Resend**, integrado à API Node.js pelo subdomínio verificado `send.poolsafe.app` e pela região de São Paulo (`sa-east-1`). O remetente vigente é `PoolSafe <nao-responda@send.poolsafe.app>`.
 
 Usos previstos:
 
@@ -123,9 +151,13 @@ Usos previstos:
 - recuperação e redefinição de senha;
 - comunicações transacionais indispensáveis à conta.
 
-**Estado:** decidido, ainda não implementado. A ativação depende da liberação do benefício do domínio, da configuração DNS e da validação do domínio no Resend. O cadastro atualmente implementado ainda não envia mensagem de confirmação nem exige verificação de e-mail. Contrato, estado do usuário e fluxo de confirmação deverão ser revisados antes dessa funcionalidade entrar em produção.
+SPF e DKIM foram configurados no DNS da Cloudflare. Foi adicionado DMARC inicial com política `p=none`, adequada para observação antes de políticas mais restritivas. A chave da API possui apenas permissão de envio e está restrita ao domínio; seu valor existe somente no ambiente privado do backend.
 
-### 4.3 Heartbeat e conectividade das câmeras
+A recuperação de senha foi implementada de ponta a ponta. A API gera um código de uso único no formato visual `XXXX-XXXX`, armazena somente seu hash SHA-256, aplica validade inicial de 15 minutos e envia versões HTML e texto do e-mail pelo Resend. A redefinição protege a nova senha com Argon2id, consome o código atomicamente, revoga todas as sessões e invalida os dispositivos da conta. Solicitações de recuperação mantêm resposta pública genérica e limites por e-mail normalizado e IP.
+
+**Estado:** domínio, DNS, envio transacional e Fatia 3B implementados e validados com recebimento real de e-mail e redefinição no Android. A confirmação do endereço no cadastro permanece pendente e não altera, por enquanto, o comportamento atual de criação de conta e login.
+
+### 4.4 Heartbeat e conectividade das câmeras
 
 O estado de conexão da câmera permanece calculado, e não persistido. O MySQL mantém somente `camera.ultima_comunicacao_em`; a API compara esse instante com a janela operacional configurável de 90 segundos:
 
@@ -161,7 +193,7 @@ Não é necessário gravar uma transição para `OFFLINE` nem executar rotina pe
 
 ### 6.1 Aplicativo mobile
 
-**Estado:** Fatias 1, 2, 3A e 4 concluídas para o ambiente local Android.
+**Estado:** Fatias 1, 2, 3A, 3B, 4 e 5 concluídas para o ambiente local Android.
 
 Implementado e validado:
 
@@ -184,20 +216,31 @@ Implementado e validado:
 - tela de conta integrada à API;
 - Home autenticada com estado de monitoramento, resumo de câmeras, avisos, sincronização e alerta recente;
 - diferenciação entre carregamento, vazio, erro sem dados e dados anteriores desatualizados;
-- atualização manual da Home e validação de seus cenários com seeds do Prisma.
+- atualização manual da Home e validação de seus cenários com seeds do Prisma;
+- aba de câmeras integrada à API com resumo de conectividade e listagem autorizada;
+- detalhes da câmera com situação administrativa, conexão, monitoramento e última comunicação;
+- apresentação de até 30 alertas recentes dos quais o usuário foi destinatário;
+- estados de carregamento, vazio, erro, atualização manual e dados desatualizados nas telas de câmera;
+- validação manual da Fatia 5 no Android com seeds para câmeras online, offline, desconhecidas, inativas, sem monitoramento, sem alertas e lista vazia;
+- solicitação pública de recuperação com resposta genérica;
+- tela para código, nova senha e confirmação, com retorno seguro ao Login;
+- integração real de recuperação com Resend e domínio próprio;
+- validação manual da Fatia 3B no Android, incluindo recebimento do e-mail, uso do código e novo login;
+- 59 testes aprovados no backend e 35 no frontend ao término da Fatia 3B.
 
 Ainda pendente:
 
-- recuperação de senha;
 - confirmação de e-mail;
-- câmeras, monitoramento e alertas;
+- controle do monitoramento;
+- histórico, detalhes e evidências de alertas;
+- prontidão Android para alertas sonoros e permissões;
 - registro de dispositivo e FCM Token;
 - notificações em foreground, background e aplicativo encerrado;
 - tema claro e refinamentos finais de acessibilidade.
 
 ### 6.2 API Node.js
 
-**Estado:** persistência inicial, autenticação, sessão, conta e Home implementadas localmente.
+**Estado:** persistência inicial, autenticação, sessão, conta, recuperação de senha, Home e câmeras implementadas localmente.
 
 A API utiliza Node.js 24 LTS, TypeScript, NestJS, Prisma 7 e MySQL 8.4. Estão implementados:
 
@@ -216,6 +259,8 @@ A API utiliza Node.js 24 LTS, TypeScript, NestJS, Prisma 7 e MySQL 8.4. Estão i
 - `PATCH /api/v1/users/me`;
 - `PUT /api/v1/users/me/password`;
 - `GET /api/v1/home`;
+- `GET /api/v1/cameras`;
+- `GET /api/v1/cameras/{cameraId}`;
 - logout com revogação imediata;
 - Argon2id para senhas;
 - proteção contra enumeração de conta;
@@ -229,15 +274,23 @@ Rotas atualmente implementadas para identidade:
 - `POST /api/v1/auth/login`;
 - `POST /api/v1/auth/refresh`;
 - `POST /api/v1/auth/logout`;
+- `POST /api/v1/auth/forgot-password`;
+- `POST /api/v1/auth/reset-password`;
 - `GET /api/v1/users/me`;
 - `PATCH /api/v1/users/me`;
 - `PUT /api/v1/users/me/password`.
 
-Rota funcional implementada após identidade:
+Rotas funcionais implementadas após identidade:
 
-- `GET /api/v1/home`.
+- `GET /api/v1/home`;
+- `GET /api/v1/cameras`;
+- `GET /api/v1/cameras/{cameraId}`.
 
-Recuperação de senha, confirmação de e-mail e os demais módulos funcionais continuam pendentes. A Fatia 3 foi dividida operacionalmente: a Fatia 3A de conta autenticada está concluída, enquanto a Fatia 3B de recuperação aguarda domínio e Resend.
+O módulo de recuperação utiliza um serviço de e-mail injetável, o SDK oficial do Resend e o modelo existente `token_recuperacao_senha`. O segredo nunca é persistido ou registrado em texto simples. Códigos anteriores ainda não usados são invalidados quando uma nova solicitação é criada. Falhas do provedor não alteram a resposta pública conforme a existência da conta.
+
+O módulo de câmeras restringe consultas por `acesso_camera` ativo, retorna `404 RESOURCE_NOT_FOUND` sem revelar recursos de outros usuários, calcula conectividade com a mesma política compartilhada pela Home e consulta alertas recentes por `alerta_destinatario`. A janela de câmera offline permanece configurável, inicialmente em 90 segundos. A listagem utiliza ordenação estável; o detalhe retorna até 30 alertas dos últimos 30 dias, ordenados do mais recente para o mais antigo.
+
+Confirmação de e-mail, controle de monitoramento e os demais módulos funcionais continuam pendentes. A Fatia 3 foi dividida operacionalmente, e suas partes 3A e 3B estão concluídas.
 
 ### 6.3 Backend Python de visão computacional
 
@@ -318,21 +371,35 @@ Na VPS já existem o container MySQL, o banco `poolsafe`, o usuário restrito, o
 
 ### 6.7 Firebase Cloud Messaging
 
-**Estado:** tecnologia decidida; integração pendente.
+**Estado:** FCM decidido; integração e camada de apresentação Android pendentes.
 
 O FCM será usado exclusivamente para push. O aplicativo deverá registrar a instalação e o token pela API, atualizar o vínculo quando o token mudar e tratar abertura de alertas nos diferentes estados do app.
 
 No escopo atual do MVP, o FCM notificará possíveis situações de risco. Indisponibilidade de câmera será apresentada nas consultas da Home e de câmeras, sem push operacional. Essa decisão evita representar falha técnica como alerta de detecção e evita ampliar o schema antes de existir um modelo de incidente e deduplicação.
 
-### 6.8 Gateway Orange Pi e Cloudflare
+Os alertas de risco deverão utilizar prioridade alta e um canal Android próprio, com som, vibração e configuração orientada a situações críticas. Foi considerada viável uma prova técnica com `AudioAttributes.USAGE_ALARM`, permitindo que aparelhos compatíveis relacionem o som ao controle de volume de alarmes. No Android 13 ou superior, o aplicativo deverá solicitar `POST_NOTIFICATIONS` com contexto. A tentativa de atravessar o modo “Não Perturbe” dependerá de `ACCESS_NOTIFICATION_POLICY` e de autorização explícita do usuário.
 
-**Estado:** implementados e validados com a câmera de teste.
+O aplicativo deverá verificar se notificações e o canal crítico estão habilitados, representar a prontidão como `PRONTO`, `DEGRADADO` ou `DESATIVADO`, orientar a abertura das configurações do sistema e oferecer teste sonoro. O Android e o usuário mantêm o controle final: o PoolSafe não poderá prometer som obrigatório quando o canal estiver silenciado, o volume estiver zerado, o aplicativo tiver sido forçadamente parado ou houver restrição do sistema.
+
+Não serão solicitados no MVP `SCHEDULE_EXACT_ALARM`, tela cheia automática, sobreposição sobre outros aplicativos ou serviço permanente apenas para aguardar o FCM. A prontidão Android será tratada na Fatia 8A; registro da instalação e token FCM, na Fatia 8B; e entrega real nos estados foreground, background e aplicativo encerrado, na Fatia 9.
+
+### 6.8 Cloudflare e domínio `poolsafe.app`
+
+**Estado:** camada pública e conectividade privada implementadas nas funções atualmente utilizadas.
+
+A Cloudflare é responsável pelo DNS autoritativo do domínio, HTTPS da landing page, proxy e regras de redirecionamento, hospedagem estática em Worker, registros de autenticação do Resend e conectividade privada por Tunnel/WARP. O domínio raiz é o endereço canônico da apresentação pública, enquanto `www` redireciona permanentemente para `poolsafe.app`.
+
+Essa camada não substitui a API Node.js nem o controle de autorização da aplicação. A Cloudflare protege e encaminha tráfego nas bordas definidas, enquanto as regras de negócio permanecem na API e nos serviços internos.
+
+### 6.9 Gateway Orange Pi
+
+**Estado:** implementado e validado com a câmera de teste.
 
 O Orange Pi Zero 3 executa Debian Bookworm Server e atua como gateway de rede. O `cloudflared` funciona como serviço do `systemd`, inicia no boot e restabelece a rota privada após reinicialização.
 
 A VPS utiliza Cloudflare One Client/WARP para alcançar a rede da câmera. A câmera D-Link DCS-930L de teste fornece HTTP/MJPEG. Conexão TCP, resposta HTTP e stream contínuo foram validados a partir da VPS. A validação com câmera RTSP definitiva permanece pendente.
 
-### 6.9 VPS Contabo
+### 6.10 VPS Contabo
 
 **Estado:** infraestrutura-base implementada.
 
@@ -399,13 +466,17 @@ A câmera antiga demonstra a viabilidade da conectividade privada, mas não subs
 8. A API verifica usuário e sessão em todas as rotas protegidas.
 9. O logout revoga a sessão e remove os dados locais.
 
-### 9.2 Recuperação e confirmação por e-mail — pendente
+### 9.2 Recuperação de senha por e-mail — implementada localmente
 
-1. O usuário inicia a ação no aplicativo.
-2. A API cria um segredo de uso único e armazena somente seu hash.
-3. A API solicita ao Resend o envio pelo domínio verificado.
-4. O usuário utiliza link ou código dentro da validade definida.
-5. A API valida o segredo, conclui a operação e revoga sessões quando aplicável.
+1. O usuário informa o e-mail no fluxo público do aplicativo.
+2. A API sempre devolve uma resposta genérica, exista ou não a conta.
+3. Para uma conta ativa, a API cria um código seguro de uso único e armazena somente seu hash SHA-256.
+4. A API solicita ao Resend o envio pelo domínio verificado `send.poolsafe.app`.
+5. O usuário informa o código e a nova senha no aplicativo dentro da validade de 15 minutos.
+6. A API valida e consome o código atomicamente, grava a nova senha com Argon2id, revoga todas as sessões e invalida os dispositivos da conta.
+7. O usuário retorna ao Login e autentica-se com a nova senha.
+
+A confirmação de endereço de e-mail no cadastro permanece uma jornada futura separada.
 
 ### 9.3 Geração e entrega de alerta — arquitetura decidida
 
@@ -437,7 +508,7 @@ A câmera antiga demonstra a viabilidade da conectividade privada, mas não subs
 - React Hook Form;
 - Zod;
 - Expo SecureStore;
-- React Native Firebase Messaging, a integrar na fatia própria;
+- camada de notificações pendente de prova técnica: `expo-notifications` com FCM direto é o candidato inicial, podendo substituir ou complementar `@react-native-firebase/messaging`;
 - `expo-dev-client`.
 
 Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local de interface permanecem separados. Não foi adotada biblioteca adicional de estado global.
@@ -454,6 +525,7 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 - NestJS Throttler;
 - Problem Details RFC 9457;
 - Swagger/OpenAPI;
+- SDK oficial do Resend;
 - Docker multi-stage.
 
 ## 12. Segurança e privacidade
@@ -465,6 +537,7 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 - a API pública deverá utilizar HTTPS;
 - senhas usam Argon2id;
 - refresh tokens são armazenados somente como hash;
+- códigos de recuperação são armazenados somente como hash SHA-256 e possuem validade curta e uso único;
 - a rotação usa transação e bloqueio pessimista;
 - respostas não expõem stack, SQL ou topologia interna;
 - evidências são dados sensíveis e exigem autorização;
@@ -503,11 +576,12 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 | Bootstrap técnico | Concluído |
 | Identidade visual e componentes fundamentais | Concluída |
 | Persistência, cadastro, login e sessão | Concluída localmente de ponta a ponta |
-| Recuperação de acesso e conta | Parcial: Fatia 3A concluída; Fatia 3B aguarda domínio e Resend |
+| Recuperação de acesso e conta | Concluída: Fatias 3A e 3B implementadas e validadas no Android |
 | Home | Concluída localmente de ponta a ponta |
-| Câmeras | Pendente |
+| Câmeras | Concluída localmente de ponta a ponta e validada no Android |
 | Monitoramento | Pendente |
 | Histórico e detalhes de alerta | Pendente |
+| Prontidão Android para alertas — Fatia 8A | Pendente; arquitetura e prova técnica definidas |
 | Dispositivo e FCM Token | Pendente |
 | Notificações | Pendente |
 | Definições, temas e refinamentos | Parcial/Pendente |
@@ -517,17 +591,17 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 
 ### Aplicativo e conta
 
-- recuperação de senha;
-- confirmação de e-mail quando domínio e Resend estiverem disponíveis;
-- câmeras, monitoramento e alertas;
-- FCM e notificações.
+- confirmação de e-mail no cadastro, em etapa futura separada;
+- controle de monitoramento;
+- histórico, detalhes e evidências de alertas;
+- prova técnica de som crítico, permissões Android e biblioteca de notificações;
+- dispositivo, FCM e notificações reais.
 
 ### API e dados
 
-- endpoints posteriores à autenticação;
+- endpoints de monitoramento, alertas e dispositivos;
 - implantação da API na VPS;
 - aplicação das migrations com `prisma migrate deploy`;
-- integração segura com Resend;
 - geração final e versionada do OpenAPI;
 - retenção e expurgo de evidências.
 
@@ -553,8 +627,9 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 - `api-contract.md`;
 - `app-requirements.md`;
 - `design-system.md`;
-- `PoolSafe_Plano_de_Fatias_Verticais.md`;
-- `Poolsafe_Processos_Pendentes_Mapeados-ATUALIZADO_27-09-2026.md`;
+- `PoolSafe_Plano_de_Fatias_Verticais_ATUALIZADO_03-10-2026_15H.md`;
+- `Poolsafe_Processos_Pendentes_Mapeados-ATUALIZADO_27-09-2026_06AM.md`;
 - relatórios de conclusão das Etapas 2A, 2B e 2C;
-- relatórios de conclusão das Fatias 3A e 4;
-- decisões confirmadas até 27 de setembro de 2026.
+- relatórios de conclusão das Fatias 3A, 4 e 5;
+- relatório de conclusão da Fatia 3B;
+- decisões confirmadas até 3 de outubro de 2026 — 15h.

@@ -14,6 +14,7 @@ interface MariaDbPoolConfig {
   password?: string;
   database?: string;
   connectionLimit: number;
+  allowPublicKeyRetrieval?: boolean;
 }
 
 function parseDatabaseUrl(rawUrl: string): MariaDbPoolConfig {
@@ -57,6 +58,14 @@ function parseDatabaseUrl(rawUrl: string): MariaDbPoolConfig {
       ? parsedLimit
       : 10;
 
+  const allowPublicKeyRetrievalParam = parsed.searchParams.get(
+    'allowPublicKeyRetrieval',
+  );
+  const allowPublicKeyRetrieval =
+    allowPublicKeyRetrievalParam !== null
+      ? allowPublicKeyRetrievalParam === 'true'
+      : true;
+
   return {
     host,
     port,
@@ -64,6 +73,7 @@ function parseDatabaseUrl(rawUrl: string): MariaDbPoolConfig {
     password,
     database,
     connectionLimit,
+    allowPublicKeyRetrieval,
   };
 }
 

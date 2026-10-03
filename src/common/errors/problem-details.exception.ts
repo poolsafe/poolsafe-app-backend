@@ -143,3 +143,42 @@ export class ResourceNotFoundException extends ProblemDetailsException {
   }
 }
 
+export class InvalidResetTokenException extends ProblemDetailsException {
+  constructor(detail = 'O código de recuperação informado é inválido ou já foi utilizado.') {
+    super({
+      status: HttpStatus.UNPROCESSABLE_ENTITY,
+      code: 'INVALID_RESET_TOKEN',
+      title: 'Token de recuperação inválido',
+      detail,
+    });
+  }
+}
+
+export class ResetTokenExpiredException extends ProblemDetailsException {
+  constructor(detail = 'O código de recuperação informado expirou. Solicite um novo código.') {
+    super({
+      status: HttpStatus.GONE,
+      code: 'RESET_TOKEN_EXPIRED',
+      title: 'Token de recuperação expirado',
+      detail,
+    });
+  }
+}
+
+export class RateLimitedException extends ProblemDetailsException {
+  public readonly retryAfterSeconds?: number;
+
+  constructor(
+    detail = 'Muitas solicitações em sequência. Tente novamente mais tarde.',
+    retryAfterSeconds?: number,
+  ) {
+    super({
+      status: HttpStatus.TOO_MANY_REQUESTS,
+      code: 'RATE_LIMITED',
+      title: 'Limite temporário excedido',
+      detail,
+    });
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+

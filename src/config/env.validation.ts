@@ -64,5 +64,37 @@ export class EnvConfig {
   @IsInt()
   @Min(1)
   CAMERA_OFFLINE_THRESHOLD_SECONDS: number = 90;
+
+  /**
+   * Chave da API do Resend para envio de e-mails transacionais (Fatia 3B).
+   * Opcional em ambiente local/testes sem envio real.
+   */
+  @IsOptional()
+  @IsString()
+  RESEND_API_KEY?: string;
+
+  /**
+   * Remetente dos e-mails transacionais.
+   * Padrão: PoolSafe <nao-responda@send.poolsafe.app>
+   */
+  @IsOptional()
+  @IsString()
+  EMAIL_FROM: string = 'PoolSafe <nao-responda@send.poolsafe.app>';
+
+  /**
+   * URL do logo oficial do PoolSafe para inserção no cabeçalho do e-mail.
+   */
+  @IsOptional()
+  @IsString()
+  EMAIL_LOGO_URL: string = 'https://poolsafe.app/assets/poolsafe-email-logo.png';
+
+  /**
+   * Tempo de vida (TTL) do código de recuperação de senha em minutos.
+   * Padrão: 15 minutos.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  PASSWORD_RESET_TOKEN_TTL_MINUTES: number = 15;
 }
 
