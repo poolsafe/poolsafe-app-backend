@@ -12,6 +12,7 @@ export interface ProblemDetailsOptions {
   title: string;
   detail: string;
   errors?: ProblemErrorItem[];
+  extensions?: Record<string, unknown>;
 }
 
 /**
@@ -24,6 +25,7 @@ export class ProblemDetailsException extends HttpException {
   public readonly title: string;
   public readonly detailMessage: string;
   public readonly errorsList?: ProblemErrorItem[];
+  public readonly extensions?: Record<string, unknown>;
 
   constructor(options: ProblemDetailsOptions) {
     super(
@@ -33,6 +35,7 @@ export class ProblemDetailsException extends HttpException {
         title: options.title,
         detail: options.detail,
         errors: options.errors,
+        ...(options.extensions ? options.extensions : {}),
       },
       options.status,
     );
@@ -40,6 +43,7 @@ export class ProblemDetailsException extends HttpException {
     this.title = options.title;
     this.detailMessage = options.detail;
     this.errorsList = options.errors;
+    this.extensions = options.extensions;
   }
 }
 
@@ -200,6 +204,32 @@ export class CameraNotOperationalException extends ProblemDetailsException {
       code: 'CAMERA_NOT_OPERATIONAL',
       title: 'Câmera não operacional',
       detail,
+    });
+  }
+}
+
+export class EvidenceNotFoundException extends ProblemDetailsException {
+  constructor(detail = 'Evidência não encontrada para este alerta.') {
+    super({
+      status: HttpStatus.NOT_FOUND,
+      code: 'EVIDENCE_NOT_FOUND',
+      title: 'Evidência não encontrada',
+      detail,
+    });
+  }
+}
+
+export class EvidenceUnavailableException extends ProblemDetailsException {
+  constructor(
+    detail = 'Evidência indisponível.',
+    reason: 'EXPIRED' | 'REMOVED' = 'EXPIRED',
+  ) {
+    super({
+      status: HttpStatus.GONE,
+      code: 'EVIDENCE_UNAVAILABLE',
+      title: 'Evidência indisponível',
+      detail,
+      extensions: { reason },
     });
   }
 }

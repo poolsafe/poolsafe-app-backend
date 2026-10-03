@@ -161,6 +161,9 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       code,
       requestId,
       ...(errors && errors.length > 0 ? { errors } : {}),
+      ...(exception instanceof ProblemDetailsException && exception.extensions
+        ? exception.extensions
+        : {}),
     };
 
     if (exception instanceof RateLimitedException && exception.retryAfterSeconds !== undefined) {

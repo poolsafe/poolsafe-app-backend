@@ -13,6 +13,7 @@ import { UsersModule } from './modules/users/users.module.js';
 import { HomeModule } from './modules/home/home.module.js';
 import { CamerasModule } from './modules/cameras/cameras.module.js';
 import { MonitoringsModule } from './modules/monitorings/monitorings.module.js';
+import { AlertsModule } from './modules/alerts/alerts.module.js';
 
 function validateEnv(config: Record<string, unknown>): EnvConfig {
   const validated = plainToInstance(EnvConfig, config, {
@@ -73,6 +74,7 @@ function validateEnv(config: Record<string, unknown>): EnvConfig {
     HomeModule,
     CamerasModule,
     MonitoringsModule,
+    AlertsModule,
   ],
 })
 export class AppModule {}
