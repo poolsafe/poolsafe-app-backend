@@ -190,11 +190,12 @@ export class HomeService {
     } else if (activeSessions === 0) {
       overallStatus = 'PAUSADO';
       overallReason = 'PAUSADO_PELO_USUARIO';
-    } else if (pausedSessions > 0 && activeSessions > 0) {
+    } else if (pausedSessions > 0) {
+      // Sessões ativas e pausadas simultaneamente
       overallStatus = 'DEGRADADO';
       overallReason = 'SESSIONS_MIXED';
     } else {
-      // Todas as sessões atuais são ativas
+      // Apenas sessões ativas (pausedSessions === 0)
       if (unavailableSessions === activeSessions) {
         overallStatus = 'INDISPONIVEL';
         overallReason = 'SEM_CAMERA_ONLINE';

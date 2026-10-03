@@ -28,6 +28,13 @@ export type MonitoringOperationalStatus =
   | 'INDISPONIVEL'
   | 'PAUSADO';
 
+export type MonitoringOperationalReason =
+  | 'OPERACIONAL'
+  | 'SEM_SESSAO'
+  | 'PAUSADO_PELO_USUARIO'
+  | 'CAMERAS_INDISPONIVEIS'
+  | 'SEM_CAMERA_ONLINE';
+
 /**
  * Calcula o estado interno de conexão para resumos agregados (ex: Home),
  * onde a distinção administrativa 'INATIVA' é separada da contagem de online/offline.
@@ -115,4 +122,59 @@ export function calculateMonitoringOperationalStatus(
     return 'DEGRADADO';
   }
   return 'INDISPONIVEL';
+}
+
+/**
+ * Calcula tanto o estado operacional quanto o motivo operacional de uma sessão de monitoramento,
+ * conforme docs/domain-model.md Seção 9 e docs/api-contract.md Seção 16.1.
+ */
+export function calculateMonitoringOperationalState(
+  monitoring: {
+    status: string;
+    monitoringCameras: Array<{
+      camera: {
+        administrativeStatus: string;
+        lastCommunicationAt: Date | null;
+      };
+    }>;
+  },
+  now: Date,
+  thresholdMs: number = DEFAULT_CAMERA_OFFLINE_THRESHOLD_MS,
+): {
+  operationalStatus: MonitoringOperationalStatus;
+  operationalReason: MonitoringOperationalReason;
+} {
+  if (monitoring.status === 'PAUSADO') {
+    return {
+      operationalStatus: 'PAUSADO',
+      operationalReason: 'PAUSADO_PELO_USUARIO',
+    };
+  }
+
+  const sessionCameras = monitoring.monitoringCameras.map((mc) => mc.camera);
+  let sessionOnlineCameras = 0;
+
+  for (const cam of sessionCameras) {
+    const connState = calculateCameraConnectionState(cam, now, thresholdMs);
+    if (connState === 'ONLINE') {
+      sessionOnlineCameras++;
+    }
+  }
+
+  if (sessionOnlineCameras === sessionCameras.length && sessionCameras.length > 0) {
+    return {
+      operationalStatus: 'ATIVO',
+      operationalReason: 'OPERACIONAL',
+    };
+  }
+  if (sessionOnlineCameras > 0) {
+    return {
+      operationalStatus: 'DEGRADADO',
+      operationalReason: 'CAMERAS_INDISPONIVEIS',
+    };
+  }
+  return {
+    operationalStatus: 'INDISPONIVEL',
+    operationalReason: 'SEM_CAMERA_ONLINE',
+  };
 }

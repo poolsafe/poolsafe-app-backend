@@ -2,12 +2,12 @@
 
 > Especificação canônica das interfaces HTTP do MVP do PoolSafe.
 
-**Versão do documento:** 1.0  
+**Versão do documento:** 1.1  
 **Versão pública da API:** `v1`  
-**Status:** aprovado para implementação e futura descrição OpenAPI  
-**Última consolidação:** 18 de setembro de 2026  
+**Status:** aprovado e atualizado após a implementação da Fatia 6  
+**Última consolidação:** 3 de outubro de 2026 — 18h56  
 **Consumidor principal:** aplicativo React Native  
-**Implementação prevista:** Node.js com TypeScript
+**Implementação:** Node.js com TypeScript, NestJS e Prisma
 
 ## 1. Finalidade
 
@@ -236,8 +236,7 @@ Regras:
 | `403` | `ACCESS_DENIED` | ator autenticado sem permissão |
 | `403` | `REAUTHENTICATION_FAILED` | senha da ação sensível inválida |
 | `404` | `RESOURCE_NOT_FOUND` | inexistente ou não revelável ao ator |
-| `409` | `RESOURCE_CONFLICT` | unicidade ou concorrência genérica |
-| `409` | `ACCOUNT_CANNOT_BE_CREATED` | conflito de e-mail no cadastro de conta |
+| `409` | `RESOURCE_CONFLICT` | unicidade ou concorrência |
 | `409` | `MONITORING_STATE_CONFLICT` | composição ou transição incompatível |
 | `410` | `EVIDENCE_UNAVAILABLE` | evidência conhecida, porém expirada ou removida |
 | `413` | `PAYLOAD_TOO_LARGE` | limite excedido |
@@ -328,11 +327,12 @@ Tokens nunca aparecem em logs, erros ou respostas posteriores de consulta.
 | `POST` | `/monitorings` | sim | iniciar sessão |
 | `POST` | `/monitorings/{monitoringId}/pause` | sim + senha | pausar sessão |
 | `POST` | `/monitorings/{monitoringId}/resume` | sim | reativar sessão |
+| `POST` | `/monitorings/{monitoringId}/end` | sim + senha | encerrar sessão definitivamente |
 | `GET` | `/alerts` | sim | listar histórico paginado |
 | `GET` | `/alerts/{alertId}` | sim | obter detalhes do alerta |
 | `GET` | `/alerts/{alertId}/evidence` | sim | transmitir evidência autorizada |
 
-Endpoints administrativos de câmera, acesso e encerramento de sessão não fazem parte da API pública do MVP.
+Endpoints administrativos de câmera e acesso não fazem parte da API pública do MVP. O encerramento de monitoramento é público somente para usuário reautenticado com acesso ativo a todas as câmeras da sessão.
 
 ## 11. Autenticação
 
@@ -616,7 +616,7 @@ Retorna `200 OK` com todas as câmeras de acesso ativo do usuário. Não usa pag
 
 ### 15.3 `GET /cameras/{cameraId}`
 
-Retorna a câmera, sua sessão atual e até 30 alertas recentes dos quais o usuário foi destinatário. IP, protocolo, stream e credenciais nunca são retornados.
+Retorna a câmera, sua sessão atual e até cinco alertas recentes dos quais o usuário foi destinatário. IP, protocolo, stream e credenciais nunca são retornados.
 
 Sem acesso ativo, retorna `404 RESOURCE_NOT_FOUND`.
 
@@ -699,7 +699,29 @@ Sem corpo. Resposta: `200 OK` com o monitoramento atualizado.
 
 Todas as câmeras precisam estar ativas e online. Sessão já ativa retorna `200`; encerrada retorna `409`; câmera indisponível retorna `422 CAMERA_NOT_OPERATIONAL`.
 
-O encerramento não é exposto ao aplicativo no MVP.
+### 16.7 `POST /monitorings/{monitoringId}/end`
+
+```json
+{
+  "password": "senha-atual"
+}
+```
+
+Resposta: `200 OK` com o monitoramento em estado `ENCERRADO`.
+
+Regras:
+
+- exige acesso ativo a todas as câmeras da sessão;
+- aceita sessão `ATIVA` ou `PAUSADA`;
+- verifica a senha atual na mesma requisição e nunca registra ou persiste seu valor;
+- preenche `endedAt` e cria o evento `ENCERRADO` na mesma transação;
+- preserva a composição, eventos e alertas históricos;
+- libera as câmeras para novas sessões somente após a confirmação da transação;
+- sessão já encerrada retorna `200` com o estado atual e não cria outro evento;
+- senha inválida retorna `403 REAUTHENTICATION_FAILED`;
+- recurso inexistente ou não autorizado retorna `404 RESOURCE_NOT_FOUND`.
+
+O endpoint não remove câmeras nem vínculos históricos. Para utilizar outra composição, o cliente encerra a sessão atual e inicia uma nova.
 
 ## 17. Alertas
 
@@ -959,6 +981,7 @@ O frontend ocultar um botão não constitui autorização. Todas as regras são 
 - `PUT /devices/{installationId}` é idempotente;
 - `DELETE /devices/{installationId}` é idempotente;
 - pausar sessão já pausada e reativar sessão já ativa retornam o estado atual;
+- encerrar sessão já encerrada retorna o estado terminal sem duplicar o evento `ENCERRADO`;
 - iniciar com a mesma composição já ativa retorna a sessão existente;
 - composição sobreposta a outra sessão gera `409`;
 - transições usam bloqueio ou versão interna para impedir corrida;
@@ -1051,6 +1074,7 @@ Cenários obrigatórios:
 - câmera sem acesso retornando `404`;
 - monitoramento de uma e várias câmeras;
 - pausa com e sem reautenticação válida;
+- encerramento com reautenticação, preservação do histórico e idempotência;
 - duas tentativas concorrentes de iniciar monitoramento;
 - paginação estável de alertas;
 - histórico após revogação do acesso à câmera;

@@ -182,3 +182,25 @@ export class RateLimitedException extends ProblemDetailsException {
   }
 }
 
+export class MonitoringStateConflictException extends ProblemDetailsException {
+  constructor(detail = 'Não foi possível concluir a operação devido a um conflito no estado da sessão ou das câmeras.') {
+    super({
+      status: HttpStatus.CONFLICT,
+      code: 'MONITORING_STATE_CONFLICT',
+      title: 'Conflito de estado de monitoramento',
+      detail,
+    });
+  }
+}
+
+export class CameraNotOperationalException extends ProblemDetailsException {
+  constructor(detail = 'Uma ou mais câmeras selecionadas não estão operacionais (inativas, offline ou desconhecidas).') {
+    super({
+      status: HttpStatus.UNPROCESSABLE_ENTITY,
+      code: 'CAMERA_NOT_OPERATIONAL',
+      title: 'Câmera não operacional',
+      detail,
+    });
+  }
+}
+

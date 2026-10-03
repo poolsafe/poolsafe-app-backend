@@ -2,9 +2,9 @@
 
 > Especificação canônica dos conceitos, comportamentos, invariantes e limites transacionais do MVP do PoolSafe.
 
-**Versão:** 1.0  
-**Status:** aprovado para orientar o contrato da API e a implementação  
-**Última consolidação:** 18 de setembro de 2026  
+**Versão:** 1.1  
+**Status:** aprovado e atualizado após a implementação da Fatia 6  
+**Última consolidação:** 3 de outubro de 2026 — 18h56  
 **Documentos superiores:** `POOLSAFE_SOURCE_OF_TRUTH.md`, `docs/app-requirements.md` e `docs/database-schema.md`
 
 ## 1. Finalidade
@@ -249,7 +249,9 @@ Regras por comando:
 - **Iniciar:** não pode haver outra sessão não encerrada para nenhuma câmera escolhida; todas devem estar online no instante da validação.
 - **Pausar:** exige usuário autorizado, sessão ativa, aviso apresentado pelo cliente e reautenticação por senha validada pela API na mesma operação.
 - **Reativar:** exige sessão pausada, usuário autorizado e todas as câmeras online.
-- **Encerrar:** operação administrativa ou sistêmica; nunca pode ser desfeita.
+- **Encerrar:** pode ser executado por usuário reautenticado com acesso ativo a todas as câmeras, pela administração ou pelo sistema; nunca pode ser desfeito. A operação preserva a composição e o histórico, preenche o instante de encerramento, registra um único evento `ENCERRADO` e libera as câmeras para novas sessões.
+
+Não existe desvinculação individual de câmera em uma sessão iniciada. Para alterar a composição, a sessão atual deve ser encerrada e outra deve ser criada com o novo conjunto de câmeras.
 
 A perda de conexão depois do início não pausa automaticamente a sessão. Ela altera o estado operacional calculado para degradado ou indisponível e precisa ser comunicada ao usuário.
 
@@ -377,11 +379,11 @@ Autenticação responde quem é o ator; autorização decide se ele pode agir so
 | registrar dispositivo | próprio usuário autenticado |
 | listar/ver câmera | `acesso_camera` ativo para a câmera |
 | iniciar sessão | acesso ativo a todas as câmeras escolhidas |
-| pausar/reativar sessão | acesso ativo a todas as câmeras da sessão |
+| pausar/reativar sessão | acesso ativo a todas as câmeras da sessão; pausa exige reautenticação |
 | consultar alerta | existência de `alerta_destinatario` para o usuário |
 | obter evidência | destinatário do alerta, conta ativa e evidência disponível |
 | conceder/revogar câmera | administração, fora do app MVP |
-| encerrar monitoramento | administração ou processo interno autorizado |
+| encerrar monitoramento | usuário reautenticado com acesso ativo a todas as câmeras, administração ou processo interno autorizado |
 | registrar alerta | identidade interna autorizada do workflow N8N |
 | consultar logs | operação administrativa; nunca aplicativo comum |
 
@@ -409,7 +411,7 @@ Comando representa intenção de alterar estado. Os nomes abaixo são conceituai
 | `IniciarMonitoramento` | usuário autorizado | sessão ativa com composição imutável |
 | `PausarMonitoramento` | usuário reautenticado | sessão pausada e evento auditado |
 | `ReativarMonitoramento` | usuário autorizado | sessão ativa e evento auditado |
-| `EncerrarMonitoramento` | administração/sistema | sessão encerrada definitivamente |
+| `EncerrarMonitoramento` | usuário reautenticado, administração ou sistema | sessão encerrada definitivamente, histórico preservado e câmeras liberadas |
 | `RegistrarAlerta` | N8N | alerta idempotente, evidência e destinatários |
 | `PrepararNotificacoes` | N8N | notificações e entregas pendentes |
 | `RegistrarResultadoEntrega` | N8N | entrega e estado consolidado atualizados |
@@ -425,6 +427,19 @@ Quando o usuário pede para “ativar”:
 - se existe conflito de composição ou autorização, nenhuma nova sessão é criada.
 
 O `api-contract.md` decidirá como a lista de câmeras será informada ou resolvida, sem alterar as invariantes deste documento.
+
+### 11.2 Semântica do encerramento pelo usuário
+
+O encerramento solicitado pelo aplicativo:
+
+- exige sessão `ATIVA` ou `PAUSADA` e acesso ativo do ator a todas as câmeras;
+- exige confirmação da senha atual na mesma operação;
+- é terminal e afeta a sessão inteira;
+- preenche `encerrado_em` e grava `ENCERRADO` na mesma transação;
+- preserva `monitoramento_camera`, eventos e alertas associados;
+- torna as câmeras elegíveis para novas sessões somente depois do commit;
+- é idempotente e não cria eventos duplicados quando repetido;
+- não pode ser usado como atalho para alterar fisicamente a composição histórica.
 
 ## 12. Consultas e modelos de leitura
 
@@ -513,6 +528,7 @@ Regras do fluxo:
 | iniciar sessão com câmeras | transação e bloqueio/constraint que impeça outra sessão não encerrada |
 | alterar estado do monitoramento | bloquear ou versionar a sessão; validar transição dentro da transação |
 | pausar monitoramento | validar reautenticação antes; estado e evento são gravados juntos |
+| encerrar monitoramento | validar autorização e reautenticação; estado terminal, instante e evento são gravados juntos |
 | conceder/revogar acesso | impedir períodos ativos duplicados e preservar consistência da sessão |
 | renovar FCM Token | remover vínculo anterior e associar o atual na mesma transação |
 | receber evento de risco repetido | `chave_evento` retorna o alerta já existente |
@@ -536,7 +552,7 @@ Essas categorias orientarão o futuro envelope de erros da API.
 | não encontrado | recurso inexistente dentro do escopo autorizado |
 | conflito | FCM Token ligado a outra atualização concorrente |
 | transição inválida | pausar sessão já encerrada |
-| reautenticação exigida | pausa sem confirmação válida de senha |
+| reautenticação exigida | pausa ou encerramento sem confirmação válida de senha |
 | dependência indisponível | FCM ou serviço interno temporariamente inacessível |
 | dados expirados | alerta ou evidência já removidos pela retenção |
 | configuração inconsistente | alerta sem destinatários ou sessão com acessos divergentes |
@@ -670,8 +686,10 @@ Ao implementar este domínio, o agente deve:
 - impedir sessão sem câmera, câmera inativa ou câmera offline;
 - impedir que a mesma câmera pertença a duas sessões não encerradas;
 - impedir controle por usuário sem acesso a todas as câmeras;
-- exigir reautenticação ao pausar;
+- exigir reautenticação ao pausar e encerrar pelo aplicativo;
 - registrar transição e evento de monitoramento atomicamente;
+- preservar composição e histórico ao encerrar, sem duplicar o evento terminal;
+- impedir desvinculação individual ou alteração da composição iniciada;
 - calcular ativo, pausado, degradado e indisponível corretamente;
 - consolidar corretamente a Home quando houver várias sessões atuais;
 - tratar a mesma `chave_evento` sem duplicar alerta;
@@ -691,7 +709,7 @@ O próximo documento deverá transformar estes casos de uso em interfaces HTTP e
 - autenticação, renovação e revogação de sessão;
 - representação pública dos estados e motivos calculados;
 - comandos separados para iniciar, pausar, reativar e encerrar quando aplicável;
-- reautenticação segura para pausa;
+- reautenticação segura para pausa e encerramento;
 - cadastro idempotente de dispositivo e renovação do FCM Token;
 - paginação por cursor no Histórico;
 - autorização e transmissão da evidência;

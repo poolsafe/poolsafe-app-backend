@@ -2,7 +2,7 @@
 
 > Documento técnico canônico para orientar o desenvolvimento, a integração e a documentação do PoolSafe.
 
-**Última consolidação:** 3 de outubro de 2026 — 15h  
+**Última consolidação:** 3 de outubro de 2026 — 18h56  
 **Escopo desta versão:** arquitetura geral, domínio público e camada Cloudflare, infraestrutura existente, mensageria, aplicativo mobile, API Node.js, e-mail transacional, persistência MySQL, conectividade das câmeras e estado das fatias de implementação.
 
 ## 1. Finalidade e uso
@@ -57,8 +57,8 @@ O PoolSafe constitui uma camada adicional de segurança. Ele não substitui supe
 
 | Repositório | Responsabilidade | Estado em 03/10/2026 |
 |---|---|---|
-| `poolsafe-app-frontend` | Aplicativo mobile React Native | Bootstrap, identidade visual, navegação, autenticação, conta, recuperação de senha, Home e câmeras implementados e validados no Android |
-| `poolsafe-app-backend` | API Node.js consumida pelo aplicativo | Bootstrap, Prisma, migrations, banco local, autenticação, sessão, conta, recuperação de senha com Resend, Home e câmeras implementados e validados |
+| `poolsafe-app-frontend` | Aplicativo mobile React Native | Bootstrap, identidade visual, navegação, autenticação, conta, recuperação de senha, Home, câmeras e controle de monitoramento implementados e validados no Android |
+| `poolsafe-app-backend` | API Node.js consumida pelo aplicativo | Bootstrap, Prisma, migrations, banco local, autenticação, sessão, conta, recuperação de senha com Resend, Home, câmeras e monitoramentos implementados e validados |
 | `poolsafe-landing-page` | Apresentação pública do projeto | Landing page estática implementada, publicada em Cloudflare Workers e disponível em `https://poolsafe.app` |
 
 O backend Python de visão computacional é um projeto independente. Ele integra a arquitetura geral, mas não pertence aos repositórios do aplicativo e da API.
@@ -193,7 +193,7 @@ Não é necessário gravar uma transição para `OFFLINE` nem executar rotina pe
 
 ### 6.1 Aplicativo mobile
 
-**Estado:** Fatias 1, 2, 3A, 3B, 4 e 5 concluídas para o ambiente local Android.
+**Estado:** Fatias 1, 2, 3A, 3B, 4, 5 e 6 concluídas para o ambiente local Android.
 
 Implementado e validado:
 
@@ -226,12 +226,19 @@ Implementado e validado:
 - tela para código, nova senha e confirmação, com retorno seguro ao Login;
 - integração real de recuperação com Resend e domínio próprio;
 - validação manual da Fatia 3B no Android, incluindo recebimento do e-mail, uso do código e novo login;
-- 59 testes aprovados no backend e 35 no frontend ao término da Fatia 3B.
+- tela autenticada de Controle de monitoramento, aberta acima da navegação por abas;
+- consulta das sessões atuais e seleção explícita de uma ou várias câmeras elegíveis para iniciar uma sessão;
+- pausa e encerramento da sessão completa mediante confirmação reforçada e reautenticação por senha;
+- retomada de sessões pausadas sem senha, condicionada à disponibilidade das câmeras;
+- composição imutável da sessão, sem desvinculação individual de câmeras; para mudar a composição, a sessão atual é encerrada e outra é criada;
+- atualização confirmada pela API, sem estado otimista, com invalidação coordenada da Home, monitoramentos, lista e detalhes de câmeras;
+- representação de sessões ativas e pausadas simultaneamente como `DEGRADADO / SESSIONS_MIXED`, exibida na Home como “Proteção parcial”;
+- validação manual da Fatia 6 no Android;
+- 75 testes aprovados no backend e 46 no frontend ao término da Fatia 6.
 
 Ainda pendente:
 
 - confirmação de e-mail;
-- controle do monitoramento;
 - histórico, detalhes e evidências de alertas;
 - prontidão Android para alertas sonoros e permissões;
 - registro de dispositivo e FCM Token;
@@ -240,7 +247,7 @@ Ainda pendente:
 
 ### 6.2 API Node.js
 
-**Estado:** persistência inicial, autenticação, sessão, conta, recuperação de senha, Home e câmeras implementadas localmente.
+**Estado:** persistência inicial, autenticação, sessão, conta, recuperação de senha, Home, câmeras e monitoramentos implementados localmente.
 
 A API utiliza Node.js 24 LTS, TypeScript, NestJS, Prisma 7 e MySQL 8.4. Estão implementados:
 
@@ -284,13 +291,21 @@ Rotas funcionais implementadas após identidade:
 
 - `GET /api/v1/home`;
 - `GET /api/v1/cameras`;
-- `GET /api/v1/cameras/{cameraId}`.
+- `GET /api/v1/cameras/{cameraId}`;
+- `GET /api/v1/monitorings/current`;
+- `GET /api/v1/monitorings/{monitoringId}`;
+- `POST /api/v1/monitorings`;
+- `POST /api/v1/monitorings/{monitoringId}/pause`;
+- `POST /api/v1/monitorings/{monitoringId}/resume`;
+- `POST /api/v1/monitorings/{monitoringId}/end`.
 
 O módulo de recuperação utiliza um serviço de e-mail injetável, o SDK oficial do Resend e o modelo existente `token_recuperacao_senha`. O segredo nunca é persistido ou registrado em texto simples. Códigos anteriores ainda não usados são invalidados quando uma nova solicitação é criada. Falhas do provedor não alteram a resposta pública conforme a existência da conta.
 
 O módulo de câmeras restringe consultas por `acesso_camera` ativo, retorna `404 RESOURCE_NOT_FOUND` sem revelar recursos de outros usuários, calcula conectividade com a mesma política compartilhada pela Home e consulta alertas recentes por `alerta_destinatario`. A janela de câmera offline permanece configurável, inicialmente em 90 segundos. A listagem utiliza ordenação estável; o detalhe retorna até 30 alertas dos últimos 30 dias, ordenados do mais recente para o mais antigo.
 
-Confirmação de e-mail, controle de monitoramento e os demais módulos funcionais continuam pendentes. A Fatia 3 foi dividida operacionalmente, e suas partes 3A e 3B estão concluídas.
+O módulo de monitoramentos autoriza cada operação sobre todas as câmeras da sessão, preserva a composição depois do início e impede que uma câmera participe de duas sessões não encerradas. Início, pausa, retomada e encerramento utilizam transações e bloqueio compatível com MySQL para manter estado e `evento_monitoramento` atômicos. Pausa e encerramento exigem a senha atual na própria operação, sem persistência ou registro do valor. O encerramento pode ser solicitado por usuário reautenticado e autorizado em todas as câmeras, preenche `encerrado_em`, cria um único evento `ENCERRADO`, preserva o histórico e libera as câmeras para novas sessões. Não existe comando público de desvinculação individual.
+
+Confirmação de e-mail e os demais módulos funcionais posteriores ao monitoramento continuam pendentes. A Fatia 3 foi dividida operacionalmente, e suas partes 3A e 3B estão concluídas.
 
 ### 6.3 Backend Python de visão computacional
 
@@ -497,6 +512,17 @@ A confirmação de endereço de e-mail no cadastro permanece uma jornada futura 
 5. Ao consultar Home ou câmeras, a API compara a última comunicação com a janela de 90 segundos.
 6. O aplicativo recebe `ONLINE`, `OFFLINE` ou `DESCONHECIDA` pela API e nunca consulta Python, N8N ou banco diretamente.
 
+### 9.5 Controle de monitoramento — implementado localmente
+
+1. O aplicativo consulta sessões atuais e câmeras autorizadas pela API.
+2. Para iniciar, o usuário seleciona explicitamente uma ou várias câmeras elegíveis; a API reaplica autorização, situação administrativa, conectividade e exclusividade.
+3. A sessão nasce `ATIVA`, mantém composição imutável e registra `INICIADO` na mesma transação.
+4. A pausa afeta a sessão inteira e exige a senha atual, validada na própria operação; a transição registra `PAUSADO` atomicamente.
+5. A retomada exige todas as câmeras ativas e online e registra `REATIVADO` quando ocorre transição real.
+6. O encerramento definitivo pode ser solicitado por usuário reautenticado e autorizado em todas as câmeras. A API preenche `encerrado_em`, registra `ENCERRADO`, preserva vínculos e histórico e libera as câmeras para novas sessões.
+7. Não há desvinculação individual: uma composição diferente exige encerrar a sessão e iniciar outra.
+8. A interface somente reflete uma mudança depois da confirmação da API e atualiza os dados relacionados por invalidação das consultas.
+
 ## 10. Stack do aplicativo
 
 - Expo com Development Build;
@@ -539,6 +565,8 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 - refresh tokens são armazenados somente como hash;
 - códigos de recuperação são armazenados somente como hash SHA-256 e possuem validade curta e uso único;
 - a rotação usa transação e bloqueio pessimista;
+- pausa e encerramento de monitoramento exigem reautenticação por senha na própria operação, sem persistência, cache ou logs do valor;
+- transições do monitoramento e seus eventos são atômicos e protegidos contra concorrência;
 - respostas não expõem stack, SQL ou topologia interna;
 - evidências são dados sensíveis e exigem autorização;
 - e-mails de recuperação e confirmação não devem revelar a existência de uma conta;
@@ -579,7 +607,7 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 | Recuperação de acesso e conta | Concluída: Fatias 3A e 3B implementadas e validadas no Android |
 | Home | Concluída localmente de ponta a ponta |
 | Câmeras | Concluída localmente de ponta a ponta e validada no Android |
-| Monitoramento | Pendente |
+| Monitoramento | Concluída localmente de ponta a ponta e validada no Android |
 | Histórico e detalhes de alerta | Pendente |
 | Prontidão Android para alertas — Fatia 8A | Pendente; arquitetura e prova técnica definidas |
 | Dispositivo e FCM Token | Pendente |
@@ -592,14 +620,13 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 ### Aplicativo e conta
 
 - confirmação de e-mail no cadastro, em etapa futura separada;
-- controle de monitoramento;
 - histórico, detalhes e evidências de alertas;
 - prova técnica de som crítico, permissões Android e biblioteca de notificações;
 - dispositivo, FCM e notificações reais.
 
 ### API e dados
 
-- endpoints de monitoramento, alertas e dispositivos;
+- endpoints de alertas e dispositivos;
 - implantação da API na VPS;
 - aplicação das migrations com `prisma migrate deploy`;
 - geração final e versionada do OpenAPI;
@@ -627,9 +654,9 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 - `api-contract.md`;
 - `app-requirements.md`;
 - `design-system.md`;
-- `PoolSafe_Plano_de_Fatias_Verticais_ATUALIZADO_03-10-2026_15H.md`;
+- `PoolSafe_Plano_de_Fatias_Verticais_ATUALIZADO_03-10-2026_18h56.md`;
 - `Poolsafe_Processos_Pendentes_Mapeados-ATUALIZADO_27-09-2026_06AM.md`;
 - relatórios de conclusão das Etapas 2A, 2B e 2C;
-- relatórios de conclusão das Fatias 3A, 4 e 5;
+- relatórios de conclusão das Fatias 3A, 4, 5 e 6;
 - relatório de conclusão da Fatia 3B;
-- decisões confirmadas até 3 de outubro de 2026 — 15h.
+- decisões confirmadas até 3 de outubro de 2026 — 18h56.
