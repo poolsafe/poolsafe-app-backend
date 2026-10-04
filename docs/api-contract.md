@@ -583,7 +583,8 @@ Enums:
 - `overallMonitoring.status`: `ATIVO`, `PAUSADO`, `DEGRADADO`, `INDISPONIVEL`;
 - razões iniciais: `OPERACIONAL`, `SEM_SESSAO`, `PAUSADO_PELO_USUARIO`, `CAMERAS_INDISPONIVEIS`, `SEM_CAMERA_ONLINE`;
 - resumo com sessões ativas e pausadas usa também `SESSIONS_MIXED`;
-- warning codes iniciais: `NO_CURRENT_MONITORING`, `MONITORING_PAUSED`, `CAMERA_OFFLINE`, `CAMERA_UNKNOWN`.
+- warning codes iniciais: `NO_CURRENT_MONITORING`, `MONITORING_PAUSED`, `CAMERA_OFFLINE`, `CAMERA_UNKNOWN`;
+- a lista de `warnings` consolida e retorna no máximo um aviso por tipo (`code`), evitando repetições desnecessárias na Home quando múltiplas câmeras ou sessões possuem a mesma pendência. O aplicativo apresenta mensagens de detalhe no plural ("Uma ou mais câmeras associadas...").
 
 A ausência de resposta da API é tratada pelo aplicativo como `NAO_VERIFICADO`; esse valor não é retornado como estado operacional confirmado.
 

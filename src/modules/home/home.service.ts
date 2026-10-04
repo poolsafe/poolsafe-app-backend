@@ -210,6 +210,7 @@ export class HomeService {
     }
 
     // 5. Avisos operacionais (warnings)
+    // Retorna no máximo 1 aviso por tipo de pendência operacional (code)
     const warnings: WarningItem[] = [];
 
     // Aviso de ausência de monitoramento
@@ -220,34 +221,42 @@ export class HomeService {
       });
     }
 
-    // Avisos de sessões pausadas
-    for (const monitoring of monitorings) {
-      if (monitoring.status === 'PAUSADO') {
-        warnings.push({
-          code: 'MONITORING_PAUSED',
-          severity: 'ATENCAO',
-          monitoringId: monitoring.id.toString(),
-        });
-      }
+    // Aviso de sessão(ões) pausada(s) (no máximo 1 aviso por código)
+    const pausedMonitoring = monitorings.find((m) => m.status === 'PAUSADO');
+    if (pausedMonitoring) {
+      warnings.push({
+        code: 'MONITORING_PAUSED',
+        severity: 'ATENCAO',
+        monitoringId: pausedMonitoring.id.toString(),
+      });
     }
 
-    // Avisos de câmeras offline ou desconhecidas
+    // Avisos de câmeras offline ou desconhecidas (no máximo 1 aviso por código)
+    let hasOfflineWarning = false;
+    let hasUnknownWarning = false;
+
     for (const [camIdStr, entry] of cameraMap.entries()) {
       const assignedMonitoring = cameraToMonitoringMap.get(camIdStr);
-      if (entry.connectionState === 'OFFLINE') {
+      if (entry.connectionState === 'OFFLINE' && !hasOfflineWarning) {
         warnings.push({
           code: 'CAMERA_OFFLINE',
           severity: 'ATENCAO',
           cameraId: camIdStr,
           ...(assignedMonitoring ? { monitoringId: assignedMonitoring.id.toString() } : {}),
         });
-      } else if (entry.connectionState === 'DESCONHECIDA') {
+        hasOfflineWarning = true;
+      } else if (entry.connectionState === 'DESCONHECIDA' && !hasUnknownWarning) {
         warnings.push({
           code: 'CAMERA_UNKNOWN',
           severity: 'ATENCAO',
           cameraId: camIdStr,
           ...(assignedMonitoring ? { monitoringId: assignedMonitoring.id.toString() } : {}),
         });
+        hasUnknownWarning = true;
+      }
+
+      if (hasOfflineWarning && hasUnknownWarning) {
+        break;
       }
     }
 

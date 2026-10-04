@@ -595,15 +595,15 @@ describe('Fatia 4 — Home (GET /api/v1/home)', () => {
     assert.equal(json.data.overallMonitoring.pausedSessions, 1);
     assert.equal(json.data.overallMonitoring.unavailableSessions, 1);
 
-    // Deve conter avisos de câmera sem sinal e sessão pausada
-    const hasPausedWarning = json.data.warnings.some(
+    // Deve conter avisos de câmera sem sinal e sessão pausada (máximo 1 de cada tipo)
+    const pausedWarnings = json.data.warnings.filter(
       (w: any) => w.code === 'MONITORING_PAUSED',
     );
-    const hasOfflineWarning = json.data.warnings.some(
+    const offlineWarnings = json.data.warnings.filter(
       (w: any) => w.code === 'CAMERA_OFFLINE',
     );
-    assert.ok(hasPausedWarning, 'Deve conter aviso MONITORING_PAUSED');
-    assert.ok(hasOfflineWarning, 'Deve conter aviso CAMERA_OFFLINE');
+    assert.equal(pausedWarnings.length, 1, 'Deve conter exatamente 1 aviso MONITORING_PAUSED');
+    assert.equal(offlineWarnings.length, 1, 'Deve conter exatamente 1 aviso consolidado CAMERA_OFFLINE');
   });
 
   test('8. Sessão ativa com câmera online coexistindo com sessão pausada reporta DEGRADADO e SESSIONS_MIXED', async () => {
