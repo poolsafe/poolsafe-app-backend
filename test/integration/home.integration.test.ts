@@ -514,4 +514,175 @@ describe('Fatia 4 — Home (GET /api/v1/home)', () => {
       'Usuário não destinatário não deve ver o alerta',
     );
   });
+
+  test('7. Sessões ativas sem nenhuma câmera online coexistindo com sessão pausada reporta INDISPONIVEL e SEM_CAMERA_ONLINE', async () => {
+    const client = prisma.getClient();
+    const { user, tokens } = await createTestUser('unavail-mixed');
+
+    // Câmera 1 (offline > 90s atrás) na sessão ATIVA
+    const camActiveOffline = await client.camera.create({
+      data: {
+        integrationCode: `test.home.cam.unav1.${randomUUID()}`,
+        name: 'Câmera Externa Sem Sinal',
+        administrativeStatus: 'ATIVA',
+        lastCommunicationAt: new Date(Date.now() - 300_000),
+      },
+    });
+
+    // Câmera 2 na sessão PAUSADA
+    const camPaused = await client.camera.create({
+      data: {
+        integrationCode: `test.home.cam.unav2.${randomUUID()}`,
+        name: 'Câmera Interna Pausada',
+        administrativeStatus: 'ATIVA',
+        lastCommunicationAt: new Date(Date.now() - 300_000),
+      },
+    });
+
+    await client.cameraAccess.createMany({
+      data: [
+        { userId: BigInt(user.id), cameraId: camActiveOffline.id, active: true },
+        { userId: BigInt(user.id), cameraId: camPaused.id, active: true },
+      ],
+    });
+
+    const now = Date.now();
+
+    // Sessão 1: ATIVA, mas sua câmera está OFFLINE
+    const monitoringActive = await client.monitoring.create({
+      data: {
+        status: 'ATIVO',
+        startedByUserId: BigInt(user.id),
+        startedAt: new Date(now - 10000),
+      },
+    });
+    await client.monitoringCamera.create({
+      data: {
+        monitoringId: monitoringActive.id,
+        cameraId: camActiveOffline.id,
+      },
+    });
+
+    // Sessão 2: PAUSADA pelo usuário
+    const monitoringPaused = await client.monitoring.create({
+      data: {
+        status: 'PAUSADO',
+        startedByUserId: BigInt(user.id),
+        startedAt: new Date(now - 10000),
+        pausedAt: new Date(now),
+      },
+    });
+    await client.monitoringCamera.create({
+      data: {
+        monitoringId: monitoringPaused.id,
+        cameraId: camPaused.id,
+      },
+    });
+
+    const res = await fetch(`${baseUrl}/home`, {
+      headers: { Authorization: `Bearer ${tokens.accessToken}` },
+    });
+
+    assert.equal(res.status, 200);
+    const json = (await res.json()) as any;
+
+    // Como a única sessão ativa está sem câmeras online, não há vigilância ativa real.
+    // O sistema reporta INDISPONIVEL com SEM_CAMERA_ONLINE, e não DEGRADADO / SESSIONS_MIXED.
+    assert.equal(json.data.overallMonitoring.status, 'INDISPONIVEL');
+    assert.equal(json.data.overallMonitoring.reason, 'SEM_CAMERA_ONLINE');
+    assert.equal(json.data.overallMonitoring.currentSessions, 2);
+    assert.equal(json.data.overallMonitoring.activeSessions, 1);
+    assert.equal(json.data.overallMonitoring.pausedSessions, 1);
+    assert.equal(json.data.overallMonitoring.unavailableSessions, 1);
+
+    // Deve conter avisos de câmera sem sinal e sessão pausada
+    const hasPausedWarning = json.data.warnings.some(
+      (w: any) => w.code === 'MONITORING_PAUSED',
+    );
+    const hasOfflineWarning = json.data.warnings.some(
+      (w: any) => w.code === 'CAMERA_OFFLINE',
+    );
+    assert.ok(hasPausedWarning, 'Deve conter aviso MONITORING_PAUSED');
+    assert.ok(hasOfflineWarning, 'Deve conter aviso CAMERA_OFFLINE');
+  });
+
+  test('8. Sessão ativa com câmera online coexistindo com sessão pausada reporta DEGRADADO e SESSIONS_MIXED', async () => {
+    const client = prisma.getClient();
+    const { user, tokens } = await createTestUser('mixed-working');
+
+    // Câmera 1 (ONLINE) na sessão ATIVA
+    const camOnline = await client.camera.create({
+      data: {
+        integrationCode: `test.home.cam.mix1.${randomUUID()}`,
+        name: 'Câmera Deck Online',
+        administrativeStatus: 'ATIVA',
+        lastCommunicationAt: new Date(),
+      },
+    });
+
+    // Câmera 2 na sessão PAUSADA
+    const camPaused = await client.camera.create({
+      data: {
+        integrationCode: `test.home.cam.mix2.${randomUUID()}`,
+        name: 'Câmera Spa Pausada',
+        administrativeStatus: 'ATIVA',
+        lastCommunicationAt: new Date(),
+      },
+    });
+
+    await client.cameraAccess.createMany({
+      data: [
+        { userId: BigInt(user.id), cameraId: camOnline.id, active: true },
+        { userId: BigInt(user.id), cameraId: camPaused.id, active: true },
+      ],
+    });
+
+    const now = Date.now();
+
+    // Sessão 1: ATIVA e operacional
+    const monitoringActive = await client.monitoring.create({
+      data: {
+        status: 'ATIVO',
+        startedByUserId: BigInt(user.id),
+        startedAt: new Date(now - 10000),
+      },
+    });
+    await client.monitoringCamera.create({
+      data: {
+        monitoringId: monitoringActive.id,
+        cameraId: camOnline.id,
+      },
+    });
+
+    // Sessão 2: PAUSADA
+    const monitoringPaused = await client.monitoring.create({
+      data: {
+        status: 'PAUSADO',
+        startedByUserId: BigInt(user.id),
+        startedAt: new Date(now - 10000),
+        pausedAt: new Date(now),
+      },
+    });
+    await client.monitoringCamera.create({
+      data: {
+        monitoringId: monitoringPaused.id,
+        cameraId: camPaused.id,
+      },
+    });
+
+    const res = await fetch(`${baseUrl}/home`, {
+      headers: { Authorization: `Bearer ${tokens.accessToken}` },
+    });
+
+    assert.equal(res.status, 200);
+    const json = (await res.json()) as any;
+
+    // Há vigilância ativa real em uma sessão e outra sessão pausada: DEGRADADO / SESSIONS_MIXED
+    assert.equal(json.data.overallMonitoring.status, 'DEGRADADO');
+    assert.equal(json.data.overallMonitoring.reason, 'SESSIONS_MIXED');
+    assert.equal(json.data.overallMonitoring.currentSessions, 2);
+    assert.equal(json.data.overallMonitoring.activeSessions, 1);
+    assert.equal(json.data.overallMonitoring.pausedSessions, 1);
+    assert.equal(json.data.overallMonitoring.unavailableSessions, 0);
+  });
 });

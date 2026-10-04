@@ -34,7 +34,7 @@ export class AlertsService {
 
   private getCursorSecret(): string {
     return (
-      this.configService.get<string>('JWT_ACCESS_SECRET') ||
+      this.configService.get<string>('ALERT_CURSOR_SECRET') ||
       'poolsafe-alerts-cursor-secret-default'
     );
   }

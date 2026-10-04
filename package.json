@@ -22,6 +22,8 @@
     "prisma:generate": "prisma generate",
     "seed:home": "node --experimental-strip-types scripts/seed-home-dev.ts",
     "seed:cameras": "node --experimental-strip-types scripts/seed-cameras-dev.ts",
+    "seed:alerts": "node --experimental-strip-types scripts/seed-alerts-dev.ts",
+    "set:evidence": "node --experimental-strip-types scripts/set-evidence.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

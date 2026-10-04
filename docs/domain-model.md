@@ -363,10 +363,10 @@ Quando o usuário participa de mais de uma sessão atual, a Home calcula um resu
 | nenhuma sessão atual | `INDISPONIVEL` |
 | todas pausadas | `PAUSADO` |
 | todas ativas e operacionais | `ATIVO` |
-| mistura de sessões ativas e pausadas, ou alguma sessão degradada | `DEGRADADO` |
-| nenhuma sessão pausada e todas as ativas indisponíveis | `INDISPONIVEL` |
+| mistura de sessões ativas (com ao menos uma câmera online) e pausadas, ou alguma sessão degradada | `DEGRADADO` |
+| todas as sessões ativas indisponíveis (sem nenhuma câmera online), independentemente de haver sessões pausadas | `INDISPONIVEL` |
 
-O resumo nunca esconde os resultados individuais. A resposta da Home precisa incluir o horário de referência e a quantidade de sessões por condição. Dados em cache podem ser apresentados como última informação conhecida, mas não confirmam a situação atual.
+O resumo nunca esconde os resultados individuais. Se todas as sessões ativas estiverem com suas câmeras offline, nenhuma vigilância ativa está ocorrendo no mundo real; logo, a coexistência com sessões pausadas não qualifica proteção parcial (`DEGRADADO`), prevalecendo o estado global `INDISPONIVEL` com motivo `SEM_CAMERA_ONLINE`. A condição `DEGRADADO / SESSIONS_MIXED` (apresentada na Home como “Proteção parcial” com badge de atenção em amarelo) exige que ao menos uma sessão ativa possua câmeras transmitindo sinal. A resposta da Home precisa incluir o horário de referência e a quantidade de sessões por condição. Dados em cache podem ser apresentados como última informação conhecida, mas não confirmam a situação atual.
 
 ## 10. Autorização
 

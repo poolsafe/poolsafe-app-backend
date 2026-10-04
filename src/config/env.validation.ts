@@ -96,5 +96,13 @@ export class EnvConfig {
   @IsInt()
   @Min(1)
   PASSWORD_RESET_TOKEN_TTL_MINUTES: number = 15;
+
+  /**
+   * Segredo criptográfico independente para assinatura HMAC-SHA256 do cursor de paginação de alertas (Fatia 7).
+   * Padrão com fallback para desenvolvimento local.
+   */
+  @IsOptional()
+  @IsString()
+  ALERT_CURSOR_SECRET: string = 'poolsafe-alerts-cursor-secret-default';
 }
 

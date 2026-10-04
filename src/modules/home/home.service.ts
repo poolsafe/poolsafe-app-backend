@@ -190,22 +190,23 @@ export class HomeService {
     } else if (activeSessions === 0) {
       overallStatus = 'PAUSADO';
       overallReason = 'PAUSADO_PELO_USUARIO';
+    } else if (unavailableSessions === activeSessions) {
+      // Todas as sessões ativas estão sem nenhuma câmera online (inoperantes)
+      // Independentemente de haver sessões pausadas adicionais, não há vigilância ativa no sistema.
+      overallStatus = 'INDISPONIVEL';
+      overallReason = 'SEM_CAMERA_ONLINE';
     } else if (pausedSessions > 0) {
-      // Sessões ativas e pausadas simultaneamente
+      // Sessões ativas (com ao menos uma câmera online) e pausadas simultaneamente
       overallStatus = 'DEGRADADO';
       overallReason = 'SESSIONS_MIXED';
+    } else if (degradedSessions > 0 || unavailableSessions > 0) {
+      // Apenas sessões ativas, mas com perda parcial de câmeras
+      overallStatus = 'DEGRADADO';
+      overallReason = 'CAMERAS_INDISPONIVEIS';
     } else {
-      // Apenas sessões ativas (pausedSessions === 0)
-      if (unavailableSessions === activeSessions) {
-        overallStatus = 'INDISPONIVEL';
-        overallReason = 'SEM_CAMERA_ONLINE';
-      } else if (degradedSessions > 0 || unavailableSessions > 0) {
-        overallStatus = 'DEGRADADO';
-        overallReason = 'CAMERAS_INDISPONIVEIS';
-      } else {
-        overallStatus = 'ATIVO';
-        overallReason = 'OPERACIONAL';
-      }
+      // Todas as sessões ativas e 100% operacionais
+      overallStatus = 'ATIVO';
+      overallReason = 'OPERACIONAL';
     }
 
     // 5. Avisos operacionais (warnings)
