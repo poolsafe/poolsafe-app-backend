@@ -2,8 +2,8 @@
 
 > Documento técnico canônico para orientar o desenvolvimento, a integração e a documentação do PoolSafe.
 
-**Última consolidação:** 3 de outubro de 2026 — 18h56  
-**Escopo desta versão:** arquitetura geral, domínio público e camada Cloudflare, infraestrutura existente, mensageria, aplicativo mobile, API Node.js, e-mail transacional, persistência MySQL, conectividade das câmeras e estado das fatias de implementação.
+**Última consolidação:** 8 de outubro de 2026  
+**Escopo desta versão:** arquitetura geral, domínio público e camada Cloudflare, infraestrutura existente, mensageria, aplicativo mobile, API Node.js, e-mail transacional, persistência MySQL, conectividade das câmeras, histórico de alertas, evidências, prontidão Android, módulo nativo de alarme crítico e estado das fatias de implementação.
 
 ## 1. Finalidade e uso
 
@@ -55,10 +55,10 @@ O PoolSafe constitui uma camada adicional de segurança. Ele não substitui supe
 
 ## 3. Repositórios e estado atual
 
-| Repositório | Responsabilidade | Estado em 03/10/2026 |
+| Repositório | Responsabilidade | Estado em 08/10/2026 |
 |---|---|---|
-| `poolsafe-app-frontend` | Aplicativo mobile React Native | Bootstrap, identidade visual, navegação, autenticação, conta, recuperação de senha, Home, câmeras e controle de monitoramento implementados e validados no Android |
-| `poolsafe-app-backend` | API Node.js consumida pelo aplicativo | Bootstrap, Prisma, migrations, banco local, autenticação, sessão, conta, recuperação de senha com Resend, Home, câmeras e monitoramentos implementados e validados |
+| `poolsafe-app-frontend` | Aplicativo mobile React Native | Bootstrap, identidade visual, navegação, autenticação, conta, recuperação de senha, Home, câmeras, controle de monitoramento, Histórico, detalhes de alerta, prontidão Android e módulo nativo de alarme crítico implementados; Development Build validado em aparelho físico |
+| `poolsafe-app-backend` | API Node.js consumida pelo aplicativo | Bootstrap, Prisma, migrations, banco local, autenticação, sessão, conta, recuperação de senha com Resend, Home, câmeras, monitoramentos e consulta protegida de alertas e evidências implementados e validados |
 | `poolsafe-landing-page` | Apresentação pública do projeto | Landing page estática implementada, publicada em Cloudflare Workers e disponível em `https://poolsafe.app` |
 
 O backend Python de visão computacional é um projeto independente. Ele integra a arquitetura geral, mas não pertence aos repositórios do aplicativo e da API.
@@ -193,7 +193,7 @@ Não é necessário gravar uma transição para `OFFLINE` nem executar rotina pe
 
 ### 6.1 Aplicativo mobile
 
-**Estado:** Fatias 1, 2, 3A, 3B, 4, 5 e 6 concluídas para o ambiente local Android.
+**Estado:** Fatias 1, 2, 3A, 3B, 4, 5, 6, 7, 8A e 8A.1 concluídas para o ambiente local Android.
 
 Implementado e validado:
 
@@ -234,20 +234,40 @@ Implementado e validado:
 - atualização confirmada pela API, sem estado otimista, com invalidação coordenada da Home, monitoramentos, lista e detalhes de câmeras;
 - representação de sessões ativas e pausadas simultaneamente como `DEGRADADO / SESSIONS_MIXED`, exibida na Home como “Proteção parcial”;
 - validação manual da Fatia 6 no Android;
-- 75 testes aprovados no backend e 46 no frontend ao término da Fatia 6.
+- Histórico integrado à API, ordenado do alerta mais recente para o mais antigo e carregado de forma incremental;
+- detalhes do alerta com severidade, data, câmera, local e situação da evidência;
+- navegação para os detalhes pelo Histórico, pela Home e pelos alertas recentes das câmeras;
+- consulta de alertas baseada no destinatário registrado no instante da detecção, preservando o histórico mesmo após eventual revogação posterior do acesso à câmera;
+- carregamento autenticado da evidência somente quando necessário, com permanência temporária em memória e sem download, compartilhamento ou armazenamento local persistente;
+- tratamento independente dos estados de evidência disponível, não capturada, expirada, removida ou temporariamente indisponível;
+- validação manual da Fatia 7 no Android, incluindo paginação, navegação e apresentação das evidências;
+- canal crítico Android com som provisório, vibração, diagnóstico de permissões e atalhos para configurações do sistema;
+- botão de teste de alerta na área de Definições;
+- Development Build instalado e executado em aparelho físico;
+- validação física de volume de notificações, volume de alarmes, modo Silencioso e “Não Perturbe”;
+- módulo Expo local em Kotlin para a capacidade nativa específica de alarme crítico;
+- Foreground Service temporário do tipo `mediaPlayback`, iniciado somente durante o teste e não reiniciável automaticamente;
+- reprodução local em loop pelo `MediaPlayer` com `USAGE_ALARM`, foco de áudio e duração máxima de 30 segundos;
+- vibração nativa repetida classificada como alarme, com compatibilidade entre versões do Android;
+- interrupção pela interface ou pela ação da notificação persistente, com liberação integral de player, vibração, foco de áudio, callbacks e serviço;
+- sincronização do estado do alarme por evento nativo e nova consulta quando o aplicativo retorna ao primeiro plano;
+- diagnóstico informativo de otimização de bateria e atalho para as configurações correspondentes, sem exigir exclusão automática;
+- validação física do alarme com modo Silencioso e “Não Perturbe” ativos, tela bloqueada e fechamento da interface depois do início;
+- confirmação de que o áudio utiliza o volume de Alarmes do aparelho e não o volume de notificações;
+- 86 testes aprovados no backend e 86 no frontend ao término da Fatia 8A.1.
 
 Ainda pendente:
 
 - confirmação de e-mail;
-- histórico, detalhes e evidências de alertas;
-- prontidão Android para alertas sonoros e permissões;
 - registro de dispositivo e FCM Token;
-- notificações em foreground, background e aplicativo encerrado;
+- notificações remotas e acionamento da camada nativa em foreground, background e aplicativo encerrado;
+- tela crítica interna durante o alarme e navegação pelo toque na notificação;
+- validação de Doze, prioridade real do FCM e restrições de início do serviço quando o aplicativo ainda não estiver aberto;
 - tema claro e refinamentos finais de acessibilidade.
 
 ### 6.2 API Node.js
 
-**Estado:** persistência inicial, autenticação, sessão, conta, recuperação de senha, Home, câmeras e monitoramentos implementados localmente.
+**Estado:** persistência inicial, autenticação, sessão, conta, recuperação de senha, Home, câmeras, monitoramentos, alertas e evidências implementados localmente.
 
 A API utiliza Node.js 24 LTS, TypeScript, NestJS, Prisma 7 e MySQL 8.4. Estão implementados:
 
@@ -297,7 +317,10 @@ Rotas funcionais implementadas após identidade:
 - `POST /api/v1/monitorings`;
 - `POST /api/v1/monitorings/{monitoringId}/pause`;
 - `POST /api/v1/monitorings/{monitoringId}/resume`;
-- `POST /api/v1/monitorings/{monitoringId}/end`.
+- `POST /api/v1/monitorings/{monitoringId}/end`;
+- `GET /api/v1/alerts`;
+- `GET /api/v1/alerts/{alertId}`;
+- `GET /api/v1/alerts/{alertId}/evidence`.
 
 O módulo de recuperação utiliza um serviço de e-mail injetável, o SDK oficial do Resend e o modelo existente `token_recuperacao_senha`. O segredo nunca é persistido ou registrado em texto simples. Códigos anteriores ainda não usados são invalidados quando uma nova solicitação é criada. Falhas do provedor não alteram a resposta pública conforme a existência da conta.
 
@@ -305,7 +328,9 @@ O módulo de câmeras restringe consultas por `acesso_camera` ativo, retorna `40
 
 O módulo de monitoramentos autoriza cada operação sobre todas as câmeras da sessão, preserva a composição depois do início e impede que uma câmera participe de duas sessões não encerradas. Início, pausa, retomada e encerramento utilizam transações e bloqueio compatível com MySQL para manter estado e `evento_monitoramento` atômicos. Pausa e encerramento exigem a senha atual na própria operação, sem persistência ou registro do valor. O encerramento pode ser solicitado por usuário reautenticado e autorizado em todas as câmeras, preenche `encerrado_em`, cria um único evento `ENCERRADO`, preserva o histórico e libera as câmeras para novas sessões. Não existe comando público de desvinculação individual.
 
-Confirmação de e-mail e os demais módulos funcionais posteriores ao monitoramento continuam pendentes. A Fatia 3 foi dividida operacionalmente, e suas partes 3A e 3B estão concluídas.
+O módulo de alertas entrega um histórico paginado e estável, detalhes autorizados e a evidência disponível. A autorização utiliza `alerta_destinatario`, que registra quem podia receber o alerta no momento da detecção; por isso, mudanças posteriores no acesso à câmera não apagam o histórico do usuário. A evidência é transmitida pela própria API em resposta autenticada, sem URL pública, e estados de ausência, expiração e remoção são comunicados sem impedir a consulta dos demais dados do alerta. A paginação utiliza cursor opaco protegido por segredo próprio da aplicação.
+
+Confirmação de e-mail e os módulos de dispositivos e notificações continuam pendentes. A Fatia 3 foi dividida operacionalmente, e suas partes 3A e 3B estão concluídas.
 
 ### 6.3 Backend Python de visão computacional
 
@@ -341,6 +366,8 @@ O N8N deverá:
 
 - consumir eventos do RabbitMQ;
 - validar o payload;
+- resolver exatamente uma sessão `ATIVA` que contenha a câmera antes de aceitar um evento de risco;
+- descartar eventos sem sessão ativa ou com sessão ambígua sem criar alerta de usuário, registrando o motivo de forma operacional;
 - consumir heartbeats e avançar `camera.ultima_comunicacao_em` de maneira monotônica;
 - persistir alertas e registros relacionados;
 - localizar destinatários e dispositivos;
@@ -384,19 +411,25 @@ O arquivo `001_poolsafe_schema_inicial.sql` permanece como referência históric
 
 Na VPS já existem o container MySQL, o banco `poolsafe`, o usuário restrito, o volume persistente e a rede interna. As migrations ainda não foram aplicadas nesse ambiente.
 
-### 6.7 Firebase Cloud Messaging
+### 6.7 Alertas Android e Firebase Cloud Messaging
 
-**Estado:** FCM decidido; integração e camada de apresentação Android pendentes.
+**Estado:** apresentação visual, diagnóstico de prontidão e camada nativa local de alarme implementados e validados; registro de dispositivo, entrega FCM e acionamento remoto permanecem pendentes.
 
-O FCM será usado exclusivamente para push. O aplicativo deverá registrar a instalação e o token pela API, atualizar o vínculo quando o token mudar e tratar abertura de alertas nos diferentes estados do app.
+O FCM será usado exclusivamente para push. O aplicativo deverá registrar a instalação e o token pela API, atualizar o vínculo quando o token mudar e tratar abertura de alertas nos diferentes estados do app. No escopo atual do MVP, o FCM notificará possíveis situações de risco. Indisponibilidade de câmera continuará sendo apresentada nas consultas da Home e de câmeras, sem push operacional.
 
-No escopo atual do MVP, o FCM notificará possíveis situações de risco. Indisponibilidade de câmera será apresentada nas consultas da Home e de câmeras, sem push operacional. Essa decisão evita representar falha técnica como alerta de detecção e evita ampliar o schema antes de existir um modelo de incidente e deduplicação.
+Na Fatia 8A, o aplicativo passou a solicitar `POST_NOTIFICATIONS`, criar um canal crítico versionado com som próprio, importância máxima, vibração, atributos de alarme e tentativa autorizada de atravessar o “Não Perturbe”. Também foram implementados diagnóstico de prontidão, atalhos para configurações do Android e um alerta local de teste em Definições. A validação física demonstrou, porém, que `expo-notifications` sozinho continuava subordinado ao volume de notificações e ao modo sonoro do aparelho. Por isso, ele foi mantido para permissões, banner, bandeja, conteúdo, interação e futura integração com FCM, mas não como responsável isolado pelo áudio crítico.
 
-Os alertas de risco deverão utilizar prioridade alta e um canal Android próprio, com som, vibração e configuração orientada a situações críticas. Foi considerada viável uma prova técnica com `AudioAttributes.USAGE_ALARM`, permitindo que aparelhos compatíveis relacionem o som ao controle de volume de alarmes. No Android 13 ou superior, o aplicativo deverá solicitar `POST_NOTIFICATIONS` com contexto. A tentativa de atravessar o modo “Não Perturbe” dependerá de `ACCESS_NOTIFICATION_POLICY` e de autorização explícita do usuário.
+A Fatia 8A.1 adicionou um módulo Expo local em Kotlin, restrito ao Android, sem adoção de Notifee e sem migração do restante da aplicação. Esse módulo controla um Foreground Service temporário do tipo `mediaPlayback`, promove imediatamente sua notificação obrigatória, solicita foco de áudio e utiliza `MediaPlayer` com `USAGE_ALARM` e `SONIFICATION`. O som provisório é reproduzido em loop por no máximo 30 segundos e obedece ao volume de Alarmes, sem alterar programaticamente qualquer volume do dispositivo. A vibração é solicitada nativamente com classificação de alarme e fallback compatível com versões anteriores.
 
-O aplicativo deverá verificar se notificações e o canal crítico estão habilitados, representar a prontidão como `PRONTO`, `DEGRADADO` ou `DESATIVADO`, orientar a abertura das configurações do sistema e oferecer teste sonoro. O Android e o usuário mantêm o controle final: o PoolSafe não poderá prometer som obrigatório quando o canal estiver silenciado, o volume estiver zerado, o aplicativo tiver sido forçadamente parado ou houver restrição do sistema.
+O serviço utiliza comportamento não reiniciável automaticamente e não permanece aguardando eventos. A inicialização é idempotente e o encerramento pode ocorrer pelo aplicativo, pela ação “Interromper alerta” da notificação persistente, pelo limite de 30 segundos, por erro ou pela destruição do serviço. A limpeza remove player, vibração, foco de áudio, callbacks, notificação e serviço. Nenhum Wake Lock manual, alarme exato, sobreposição sobre outros aplicativos, inicialização após boot ou serviço permanente foi adicionado.
 
-Não serão solicitados no MVP `SCHEDULE_EXACT_ALARM`, tela cheia automática, sobreposição sobre outros aplicativos ou serviço permanente apenas para aguardar o FCM. A prontidão Android será tratada na Fatia 8A; registro da instalação e token FCM, na Fatia 8B; e entrega real nos estados foreground, background e aplicativo encerrado, na Fatia 9.
+O canal final da notificação obrigatória do serviço é versionado como `poolsafe_critical_alarm_service_v2`, possui importância alta e categoria de alarme, mas permanece sem som e sem vibração próprios para não duplicar o player nativo. O teste local também apresenta a notificação visual do `expo-notifications`. Como consequência, dois banners podem aparecer: um associado ao serviço e à ação de interrupção e outro destinado à apresentação visual. O comportamento foi aceito como polimento não bloqueante e deverá ser revisto durante a integração real da Fatia 9 ou no refinamento da Fatia 11.
+
+Na área de Definições, o botão passa a iniciar e interromper o alarme, refletindo o estado emitido pelo módulo nativo e consultando-o novamente quando o aplicativo retorna ao primeiro plano. O diagnóstico de prontidão passou a reconhecer o fluxo de áudio como aprovado e pode apresentar o aparelho como `PRONTO` quando permissões e configurações verificáveis estiverem adequadas. Esse status funciona como orientação local e não como garantia de entrega. O volume de Alarmes e a otimização de bateria permanecem orientações informativas. A aplicação consegue consultar se está sujeita à otimização e abrir as configurações gerais, sem solicitar exclusão privilegiada ou obrigatória.
+
+A validação em aparelho Android físico confirmou som e vibração com volume de notificações zerado, modo Silencioso e “Não Perturbe” ativos, além de continuidade temporária com tela bloqueada e depois do fechamento da interface. O áudio acompanhou o volume de Alarmes configurado no aparelho. A prova demonstra que um serviço já iniciado consegue sustentar o alarme, mas ainda não demonstra que uma mensagem remota consiga iniciá-lo quando o processo estiver em background profundo, encerrado ou sob Doze. “Forçar parada”, volume de alarmes zerado, permissões revogadas e políticas incontornáveis do sistema permanecem limitações reconhecidas.
+
+A Fatia 8B tratará registro da instalação e token FCM. A Fatia 9 deverá avaliar o tipo de payload, a prioridade efetiva recebida, o início permitido do Foreground Service e um fallback por notificação convencional quando a camada nativa não puder ser iniciada. Também implementará uma tela crítica interna do PoolSafe: com o aplicativo aberto, ela será apresentada sobre a navegação atual; em background ou encerrado, aparecerá somente a notificação do sistema, e o toque restaurará a sessão e abrirá a experiência correspondente. Interromper o alarme encerra som, vibração e modo visual intrusivo, mas não apaga nem resolve o alerta histórico.
 
 ### 6.8 Cloudflare e domínio `poolsafe.app`
 
@@ -498,10 +531,14 @@ A confirmação de endereço de e-mail no cadastro permanece uma jornada futura 
 1. O Python confirma uma possível situação de risco.
 2. O evento é publicado no RabbitMQ.
 3. O N8N consome e valida a mensagem.
-4. O N8N persiste alerta, evidência e destinatários.
-5. O N8N solicita o envio ao FCM.
-6. O aplicativo recebe a notificação.
-7. Ao abrir, o app consulta o conteúdo autorizado pela API.
+4. Antes de aceitar o evento, o N8N precisa resolver exatamente uma sessão `ATIVA` que contenha a câmera.
+5. Sem sessão ativa, o evento não gera alerta de usuário nem entrega FCM; o descarte recebe registro operacional.
+6. Com a sessão ativa, o N8N persiste alerta, evidência e destinatários de forma idempotente.
+7. O N8N solicita o envio ao FCM.
+8. O aplicativo recebe a notificação.
+9. Ao abrir, o app consulta o conteúdo autorizado pela API.
+
+A confirmação da pausa pela API deve impedir a aceitação de novos eventos de risco daquela sessão. Um alerta já aceito enquanto a sessão estava ativa permanece histórico e não é recolhido por uma pausa posterior. Essa barreira será implementada no workflow da Fatia 9 e validada de ponta a ponta na Fatia 12. O aplicativo não é autoridade para decidir se um evento deve ser entregue.
 
 ### 9.4 Heartbeat e estado de conexão — arquitetura decidida
 
@@ -523,6 +560,25 @@ A confirmação de endereço de e-mail no cadastro permanece uma jornada futura 
 7. Não há desvinculação individual: uma composição diferente exige encerrar a sessão e iniciar outra.
 8. A interface somente reflete uma mudança depois da confirmação da API e atualiza os dados relacionados por invalidação das consultas.
 
+### 9.6 Consulta do histórico e da evidência — implementada localmente
+
+1. O aplicativo solicita à API os alertas destinados ao usuário autenticado.
+2. A API consulta a autorização histórica registrada em `alerta_destinatario` e devolve os resultados do mais recente para o mais antigo.
+3. O Histórico carrega novas páginas por cursor sem expor sua estrutura ao cliente.
+4. Ao abrir um alerta, o aplicativo consulta seus detalhes e apresenta severidade, data, câmera, local e disponibilidade da evidência.
+5. Quando existe uma evidência válida, a API transmite a imagem diretamente em uma resposta autenticada, sem gerar endereço público.
+6. O aplicativo mantém a representação da imagem somente em memória durante a visualização e a descarta ao sair da tela.
+7. Evidência ausente, expirada ou removida não impede a apresentação dos demais dados do alerta.
+
+### 9.7 Reprodução e apresentação crítica no Android — implementação local validada; integração remota pendente
+
+1. A notificação visual comunica título, contexto e destino de navegação.
+2. O módulo Kotlin inicia o serviço temporário de alarme e reproduz pelo fluxo de Alarmes.
+3. Com o aplicativo aberto, uma tela crítica interna deverá permanecer sobre a navegação normal enquanto o alarme estiver ativo.
+4. Com o aplicativo em background ou encerrado, o sistema apresenta a notificação; o toque deverá restaurar a sessão e abrir o alerta autorizado ou um fallback seguro.
+5. A interrupção manual ou o limite de 30 segundos encerrará som e vibração e retirará o modo visual intrusivo, mantendo o alerta disponível em sua tela de detalhes e no Histórico.
+6. A prova local dos itens de reprodução foi concluída na Fatia 8A.1; os comportamentos de recepção e navegação pertencem à Fatia 9.
+
 ## 10. Stack do aplicativo
 
 - Expo com Development Build;
@@ -534,7 +590,8 @@ A confirmação de endereço de e-mail no cadastro permanece uma jornada futura 
 - React Hook Form;
 - Zod;
 - Expo SecureStore;
-- camada de notificações pendente de prova técnica: `expo-notifications` com FCM direto é o candidato inicial, podendo substituir ou complementar `@react-native-firebase/messaging`;
+- `expo-notifications` para permissões, canal, diagnóstico, apresentação Android e futura integração FCM;
+- módulo Expo local em Kotlin para Foreground Service, áudio e vibração de alarme crítico;
 - `expo-dev-client`.
 
 Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local de interface permanecem separados. Não foi adotada biblioteca adicional de estado global.
@@ -568,7 +625,9 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 - pausa e encerramento de monitoramento exigem reautenticação por senha na própria operação, sem persistência, cache ou logs do valor;
 - transições do monitoramento e seus eventos são atômicos e protegidos contra concorrência;
 - respostas não expõem stack, SQL ou topologia interna;
-- evidências são dados sensíveis e exigem autorização;
+- a consulta de um alerta ou de sua evidência exige que o usuário conste como destinatário histórico;
+- evidências são dados sensíveis, trafegam somente por resposta autenticada da API e não possuem URL pública;
+- o aplicativo não mantém evidências em armazenamento persistente nem oferece download ou compartilhamento no MVP;
 - e-mails de recuperação e confirmação não devem revelar a existência de uma conta;
 - credenciais do Resend devem existir apenas no ambiente seguro da API;
 - SSH da VPS utiliza chave, sem login direto de root e sem senha.
@@ -608,9 +667,10 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 | Home | Concluída localmente de ponta a ponta |
 | Câmeras | Concluída localmente de ponta a ponta e validada no Android |
 | Monitoramento | Concluída localmente de ponta a ponta e validada no Android |
-| Histórico e detalhes de alerta | Pendente |
-| Prontidão Android para alertas — Fatia 8A | Pendente; arquitetura e prova técnica definidas |
-| Dispositivo e FCM Token | Pendente |
+| Histórico e detalhes de alerta | Concluída localmente de ponta a ponta e validada no Android |
+| Prontidão Android para alertas — Fatia 8A | Concluída como prova técnica; resultado degradado em aparelho físico |
+| Prova nativa de alarme crítico — Fatia 8A.1 | Concluída e validada com sucesso em aparelho Android físico |
+| Dispositivo e FCM Token | Pendente; próxima etapa planejada |
 | Notificações | Pendente |
 | Definições, temas e refinamentos | Parcial/Pendente |
 | Integração e demonstração completa | Pendente |
@@ -620,13 +680,15 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 ### Aplicativo e conta
 
 - confirmação de e-mail no cadastro, em etapa futura separada;
-- histórico, detalhes e evidências de alertas;
-- prova técnica de som crítico, permissões Android e biblioteca de notificações;
-- dispositivo, FCM e notificações reais.
+- dispositivo, FCM e notificações reais;
+- acionamento remoto da camada nativa nos diferentes estados do aplicativo;
+- validação sob Doze, prioridade efetiva do FCM e políticas específicas de fabricantes;
+- tela crítica interna, restauração de sessão e navegação por alerta;
+- revisão do comportamento visual com duas notificações simultâneas.
 
 ### API e dados
 
-- endpoints de alertas e dispositivos;
+- endpoints de dispositivos;
 - implantação da API na VPS;
 - aplicação das migrations com `prisma migrate deploy`;
 - geração final e versionada do OpenAPI;
@@ -639,6 +701,7 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 - publicação periódica de heartbeat pelo Python;
 - workflow do N8N para atualizar `camera.ultima_comunicacao_em`;
 - workflow definitivo do N8N;
+- bloqueio de eventos de risco quando não existir sessão `ATIVA` para a câmera;
 - integração FCM;
 - câmera RTSP e testes de latência;
 - containers definitivos do Python e da API;
@@ -654,9 +717,11 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 - `api-contract.md`;
 - `app-requirements.md`;
 - `design-system.md`;
-- `PoolSafe_Plano_de_Fatias_Verticais_ATUALIZADO_03-10-2026_18h56.md`;
-- `Poolsafe_Processos_Pendentes_Mapeados-ATUALIZADO_27-09-2026_06AM.md`;
+- `PoolSafe_Plano_de_Fatias_Verticais_ATUALIZADO_08-10-2026.md`;
+- `Poolsafe_Processos_Pendentes_Mapeados-ATUALIZADO_08-10-2026.md`;
 - relatórios de conclusão das Etapas 2A, 2B e 2C;
-- relatórios de conclusão das Fatias 3A, 4, 5 e 6;
+- relatórios de conclusão das Fatias 3A, 4, 5, 6 e 7;
 - relatório de conclusão da Fatia 3B;
-- decisões confirmadas até 3 de outubro de 2026 — 18h56.
+- relatório da Fatia 8A e validação em aparelho físico;
+- relatório de implementação da Fatia 8A.1, correções posteriores e validação em aparelho físico;
+- decisões confirmadas até 8 de outubro de 2026.
