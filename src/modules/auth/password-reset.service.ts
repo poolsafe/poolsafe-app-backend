@@ -11,6 +11,7 @@ import {
   InvalidResetTokenException,
   ResetTokenExpiredException,
 } from '../../common/errors/problem-details.exception.js';
+import { invalidateDevices } from '../devices/device-state.util.js';
 
 export interface ForgotPasswordResponse {
   data: {
@@ -239,17 +240,13 @@ export class PasswordResetService {
       });
 
       // d) Invalidação de todas as instalações/dispositivos da conta
-      await tx.device.updateMany({
-        where: {
+      await invalidateDevices(
+        tx,
+        {
           userId: tokenRecord.userId,
-          active: true,
         },
-        data: {
-          active: false,
-          invalidatedAt: now,
-          updatedAt: now,
-        },
-      });
+        now,
+      );
     });
 
     this.logger.log('Senha redefinida com sucesso. Sessões e dispositivos invalidados de forma atômica.');

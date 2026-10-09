@@ -2,8 +2,8 @@
 
 > Documento técnico canônico para orientar o desenvolvimento, a integração e a documentação do PoolSafe.
 
-**Última consolidação:** 8 de outubro de 2026  
-**Escopo desta versão:** arquitetura geral, domínio público e camada Cloudflare, infraestrutura existente, mensageria, aplicativo mobile, API Node.js, e-mail transacional, persistência MySQL, conectividade das câmeras, histórico de alertas, evidências, prontidão Android, módulo nativo de alarme crítico e estado das fatias de implementação.
+**Última consolidação:** 9 de outubro de 2026  
+**Escopo desta versão:** arquitetura geral, domínio público e camada Cloudflare, infraestrutura existente, mensageria, aplicativo mobile, API Node.js, e-mail transacional, persistência MySQL, conectividade das câmeras, histórico de alertas, evidências, prontidão Android, módulo nativo de alarme crítico, identidade da instalação, token FCM e estado das fatias de implementação.
 
 ## 1. Finalidade e uso
 
@@ -55,10 +55,10 @@ O PoolSafe constitui uma camada adicional de segurança. Ele não substitui supe
 
 ## 3. Repositórios e estado atual
 
-| Repositório | Responsabilidade | Estado em 08/10/2026 |
+| Repositório | Responsabilidade | Estado em 09/10/2026 |
 |---|---|---|
-| `poolsafe-app-frontend` | Aplicativo mobile React Native | Bootstrap, identidade visual, navegação, autenticação, conta, recuperação de senha, Home, câmeras, controle de monitoramento, Histórico, detalhes de alerta, prontidão Android e módulo nativo de alarme crítico implementados; Development Build validado em aparelho físico |
-| `poolsafe-app-backend` | API Node.js consumida pelo aplicativo | Bootstrap, Prisma, migrations, banco local, autenticação, sessão, conta, recuperação de senha com Resend, Home, câmeras, monitoramentos e consulta protegida de alertas e evidências implementados e validados |
+| `poolsafe-app-frontend` | Aplicativo mobile React Native | Bootstrap, identidade visual, navegação, autenticação, conta, recuperação de senha, Home, câmeras, controle de monitoramento, Histórico, detalhes de alerta, prontidão Android, módulo nativo de alarme crítico e sincronização da instalação/token FCM implementados; Development Build validado em aparelho físico |
+| `poolsafe-app-backend` | API Node.js consumida pelo aplicativo | Bootstrap, Prisma, migrations, banco local, autenticação, sessão, conta, recuperação de senha com Resend, Home, câmeras, monitoramentos, alertas, evidências e dispositivos implementados e validados |
 | `poolsafe-landing-page` | Apresentação pública do projeto | Landing page estática implementada, publicada em Cloudflare Workers e disponível em `https://poolsafe.app` |
 
 O backend Python de visão computacional é um projeto independente. Ele integra a arquitetura geral, mas não pertence aos repositórios do aplicativo e da API.
@@ -67,7 +67,7 @@ Também permanecem separados:
 
 - workflows do N8N;
 - RabbitMQ;
-- configuração do Firebase;
+- credencial de envio do Firebase e integração FCM do N8N;
 - infraestrutura da VPS;
 - gateway Orange Pi;
 - processamento de vídeo e treinamento do modelo.
@@ -193,7 +193,7 @@ Não é necessário gravar uma transição para `OFFLINE` nem executar rotina pe
 
 ### 6.1 Aplicativo mobile
 
-**Estado:** Fatias 1, 2, 3A, 3B, 4, 5, 6, 7, 8A e 8A.1 concluídas para o ambiente local Android.
+**Estado:** Fatias 1, 2, 3A, 3B, 4, 5, 6, 7, 8A, 8A.1 e 8B concluídas para o ambiente local Android.
 
 Implementado e validado:
 
@@ -254,12 +254,18 @@ Implementado e validado:
 - diagnóstico informativo de otimização de bateria e atalho para as configurações correspondentes, sem exigir exclusão automática;
 - validação física do alarme com modo Silencioso e “Não Perturbe” ativos, tela bloqueada e fechamento da interface depois do início;
 - confirmação de que o áudio utiliza o volume de Alarmes do aparelho e não o volume de notificações;
-- 86 testes aprovados no backend e 86 no frontend ao término da Fatia 8A.1.
+- aplicativo Android registrado no Firebase com o package `com.anonymous.poolsafeapp` e configuração nativa pelo `google-services.json`;
+- UUID v4 da instalação persistido sob chave própria no Expo SecureStore e preservado pela limpeza da sessão no logout;
+- obtenção do token FCM nativo por `Notifications.getDevicePushTokenAsync()` e observação de mudanças por `Notifications.addPushTokenListener()`;
+- sincronização autenticada de dispositivo serializada, single-flight, latest-wins e com retentativa delimitada para falhas transitórias;
+- distinção entre permissão concedida, negativa explícita e estado `undetermined`, sem apagar o token remoto enquanto o usuário ainda não decidiu;
+- apresentação do estado de sincronização na área de Definições, sem expor o UUID completo ou o token bruto;
+- validação do token nativo em aparelho Android real e inspeção dos registros de dispositivo no MySQL local;
+- 103 testes aprovados no backend e 100 no frontend ao término da Fatia 8B.
 
 Ainda pendente:
 
 - confirmação de e-mail;
-- registro de dispositivo e FCM Token;
 - notificações remotas e acionamento da camada nativa em foreground, background e aplicativo encerrado;
 - tela crítica interna durante o alarme e navegação pelo toque na notificação;
 - validação de Doze, prioridade real do FCM e restrições de início do serviço quando o aplicativo ainda não estiver aberto;
@@ -267,7 +273,7 @@ Ainda pendente:
 
 ### 6.2 API Node.js
 
-**Estado:** persistência inicial, autenticação, sessão, conta, recuperação de senha, Home, câmeras, monitoramentos, alertas e evidências implementados localmente.
+**Estado:** persistência inicial, autenticação, sessão, conta, recuperação de senha, Home, câmeras, monitoramentos, alertas, evidências e dispositivos implementados localmente.
 
 A API utiliza Node.js 24 LTS, TypeScript, NestJS, Prisma 7 e MySQL 8.4. Estão implementados:
 
@@ -320,7 +326,9 @@ Rotas funcionais implementadas após identidade:
 - `POST /api/v1/monitorings/{monitoringId}/end`;
 - `GET /api/v1/alerts`;
 - `GET /api/v1/alerts/{alertId}`;
-- `GET /api/v1/alerts/{alertId}/evidence`.
+- `GET /api/v1/alerts/{alertId}/evidence`;
+- `PUT /api/v1/devices/{installationId}`;
+- `DELETE /api/v1/devices/{installationId}`.
 
 O módulo de recuperação utiliza um serviço de e-mail injetável, o SDK oficial do Resend e o modelo existente `token_recuperacao_senha`. O segredo nunca é persistido ou registrado em texto simples. Códigos anteriores ainda não usados são invalidados quando uma nova solicitação é criada. Falhas do provedor não alteram a resposta pública conforme a existência da conta.
 
@@ -330,7 +338,9 @@ O módulo de monitoramentos autoriza cada operação sobre todas as câmeras da 
 
 O módulo de alertas entrega um histórico paginado e estável, detalhes autorizados e a evidência disponível. A autorização utiliza `alerta_destinatario`, que registra quem podia receber o alerta no momento da detecção; por isso, mudanças posteriores no acesso à câmera não apagam o histórico do usuário. A evidência é transmitida pela própria API em resposta autenticada, sem URL pública, e estados de ausência, expiração e remoção são comunicados sem impedir a consulta dos demais dados do alerta. A paginação utiliza cursor opaco protegido por segredo próprio da aplicação.
 
-Confirmação de e-mail e os módulos de dispositivos e notificações continuam pendentes. A Fatia 3 foi dividida operacionalmente, e suas partes 3A e 3B estão concluídas.
+O módulo de dispositivos registra ou atualiza idempotentemente a combinação usuário/instalação e nunca devolve o FCM Token. Um token já associado é transferido de forma atômica antes do novo vínculo, respeitando a unicidade do banco. O corpo sensível é ocultado pelo logger. O logout invalida prioritariamente o dispositivo ligado à própria sessão e utiliza o `installationId` informado apenas quando essa associação não existe; um identificador divergente não desativa outro aparelho da conta. A troca autenticada de senha preserva o dispositivo atual e invalida os demais, enquanto a redefinição por recuperação invalida todos.
+
+Confirmação de e-mail e o envio real de notificações continuam pendentes. A Fatia 3 foi dividida operacionalmente, e suas partes 3A e 3B estão concluídas.
 
 ### 6.3 Backend Python de visão computacional
 
@@ -409,13 +419,37 @@ No banco local existem as 15 tabelas de domínio e a tabela interna `_prisma_mig
 
 O arquivo `001_poolsafe_schema_inicial.sql` permanece como referência histórica do DDL aprovado, mas não é mais o mecanismo de implantação. O repositório da API e suas migrations são a fonte executável da evolução do banco.
 
+A Fatia 8B não exigiu migration. A tabela `dispositivo` já representa a associação entre usuário e instalação do aplicativo. Seus campos devem ser interpretados da seguinte forma:
+
+| Campo | Semântica vigente |
+|---|---|
+| `usuario_id` | conta à qual aquela instalação está associada |
+| `identificador_instalacao` | UUID da instalação do aplicativo, não identificador físico do aparelho |
+| `fcm_token` | endereço FCM mais recente conhecido; nulo quando a instalação não está elegível para push |
+| `ativo` | associação autorizada/elegível; não significa que o app está aberto naquele instante |
+| `ultimo_acesso_em` | última sincronização bem-sucedida do registro do dispositivo; não representa toda atividade do usuário |
+| `token_atualizado_em` | instante em que o token foi criado ou efetivamente alterado |
+| `invalidado_em` | instante de logout, revogação ou invalidação aplicável |
+
+A combinação usuário/instalação continua única, e um mesmo token não pode permanecer ligado simultaneamente a duas instalações. O registro histórico não é apagado no logout; ele é inativado e pode ser reativado em autenticação posterior.
+
 Na VPS já existem o container MySQL, o banco `poolsafe`, o usuário restrito, o volume persistente e a rede interna. As migrations ainda não foram aplicadas nesse ambiente.
 
 ### 6.7 Alertas Android e Firebase Cloud Messaging
 
-**Estado:** apresentação visual, diagnóstico de prontidão e camada nativa local de alarme implementados e validados; registro de dispositivo, entrega FCM e acionamento remoto permanecem pendentes.
+**Estado:** apresentação visual, diagnóstico de prontidão, camada nativa local de alarme e registro da instalação/token FCM implementados e validados; entrega FCM e acionamento remoto permanecem pendentes.
 
-O FCM será usado exclusivamente para push. O aplicativo deverá registrar a instalação e o token pela API, atualizar o vínculo quando o token mudar e tratar abertura de alertas nos diferentes estados do app. No escopo atual do MVP, o FCM notificará possíveis situações de risco. Indisponibilidade de câmera continuará sendo apresentada nas consultas da Home e de câmeras, sem push operacional.
+O FCM é usado exclusivamente para push. No escopo atual do MVP, ele notificará possíveis situações de risco. Indisponibilidade de câmera continuará sendo apresentada nas consultas da Home e de câmeras, sem push operacional.
+
+Na Fatia 8B, o aplicativo Android foi cadastrado no projeto Firebase com o package `com.anonymous.poolsafeapp`. O arquivo de configuração foi referenciado pela configuração Expo e aplicado ao projeto nativo Android. A integração utiliza `expo-notifications` para solicitar ao sistema o token nativo do FCM; não utiliza Expo Push Token nem o serviço intermediário de push da Expo. Firebase Authentication, Firestore e Realtime Database continuam fora da arquitetura.
+
+Cada instalação cria um UUID v4 denominado `poolSafeInstallationId`, mantido em uma chave própria do Expo SecureStore. Esse identificador representa a instalação do aplicativo vinculada a uma conta, não o hardware físico e nem o token do Google. A limpeza da sessão no logout preserva o UUID; desinstalar o aplicativo ou limpar seus dados pode criar uma nova identidade de instalação (NECESSITA DE FONTES). O FCM Token é tratado como endereço de roteamento mutável e pode mudar durante o ciclo de vida da instalação (NECESSITA DE FONTES).
+
+O serviço de sincronização consulta o token atual, observa notificações de mudança enquanto o runtime consegue processá-las e reconcilia o valor em pontos controlados do ciclo de vida autenticado. Não se presume que o código JavaScript permanecerá executando com o processo encerrado; por isso, a consulta preventiva na inicialização é complementar ao listener (NECESSITA DE FONTES). Chamadas concorrentes são serializadas com semântica single-flight/latest-wins, e falhas transitórias utilizam retentativa delimitada sem descartar o último endereço conhecido.
+
+O tratamento das permissões segue três regras: com `granted`, o token obtido é registrado; com `denied` explícito, a instalação permanece conhecida e recebe `fcmToken: null`; com `undetermined`, nenhuma atualização com `null` é enviada, pois ainda não houve decisão do usuário. Erro de rede ou falha ao consultar permissão/token também não é interpretado como negativa. A interface apresenta “Dispositivo registrado para notificações” e o estado de sincronização, sem exibir token ou UUID completos.
+
+A opção por `expo-notifications` substitui, nesta etapa, a previsão inicial de React Native Firebase do esboço do TC2. Ela foi escolhida por já pertencer à stack Expo, produzir o token nativo necessário e coexistir com a prontidão Android implementada. Essa decisão não afirma superioridade universal: React Native Firebase poderá ser reconsiderado caso a Fatia 9 demonstre uma necessidade concreta de processamento nativo ou em background que a solução atual não atenda.
 
 Na Fatia 8A, o aplicativo passou a solicitar `POST_NOTIFICATIONS`, criar um canal crítico versionado com som próprio, importância máxima, vibração, atributos de alarme e tentativa autorizada de atravessar o “Não Perturbe”. Também foram implementados diagnóstico de prontidão, atalhos para configurações do Android e um alerta local de teste em Definições. A validação física demonstrou, porém, que `expo-notifications` sozinho continuava subordinado ao volume de notificações e ao modo sonoro do aparelho. Por isso, ele foi mantido para permissões, banner, bandeja, conteúdo, interação e futura integração com FCM, mas não como responsável isolado pelo áudio crítico.
 
@@ -429,7 +463,11 @@ Na área de Definições, o botão passa a iniciar e interromper o alarme, refle
 
 A validação em aparelho Android físico confirmou som e vibração com volume de notificações zerado, modo Silencioso e “Não Perturbe” ativos, além de continuidade temporária com tela bloqueada e depois do fechamento da interface. O áudio acompanhou o volume de Alarmes configurado no aparelho. A prova demonstra que um serviço já iniciado consegue sustentar o alarme, mas ainda não demonstra que uma mensagem remota consiga iniciá-lo quando o processo estiver em background profundo, encerrado ou sob Doze. “Forçar parada”, volume de alarmes zerado, permissões revogadas e políticas incontornáveis do sistema permanecem limitações reconhecidas.
 
-A Fatia 8B tratará registro da instalação e token FCM. A Fatia 9 deverá avaliar o tipo de payload, a prioridade efetiva recebida, o início permitido do Foreground Service e um fallback por notificação convencional quando a camada nativa não puder ser iniciada. Também implementará uma tela crítica interna do PoolSafe: com o aplicativo aberto, ela será apresentada sobre a navegação atual; em background ou encerrado, aparecerá somente a notificação do sistema, e o toque restaurará a sessão e abrirá a experiência correspondente. Interromper o alarme encerra som, vibração e modo visual intrusivo, mas não apaga nem resolve o alerta histórico.
+A Fatia 9 deverá avaliar o tipo de payload, a prioridade efetiva recebida, o início permitido do Foreground Service e um fallback por notificação convencional quando a camada nativa não puder ser iniciada. Também implementará uma tela crítica interna do PoolSafe: com o aplicativo aberto, ela será apresentada sobre a navegação atual; em background ou encerrado, aparecerá somente a notificação do sistema, e o toque restaurará a sessão e abrirá a experiência correspondente. Interromper o alarme encerra som, vibração e modo visual intrusivo, mas não apaga nem resolve o alerta histórico.
+
+A entrega deverá ser construída reconhecendo uma corrida possível: o N8N pode ler o token `T1`, o aplicativo atualizar o banco para `T2` e o FCM rejeitar `T1`. Uma invalidação incondicional apagaria o token novo. Portanto, falhas definitivas só poderão limpar o token se o valor persistido ainda for igual ao utilizado na tentativa. Quando a comparação não alterar linhas, o workflow deverá reler o dispositivo e poderá tentar uma vez o valor novo na mesma `entrega_notificacao`, sem duplicar o alerta. A transação de persistência não permanecerá aberta durante a chamada de rede.
+
+A resposta de aceitação do FCM não comprova recebimento nem apresentação no aparelho (NECESSITA DE FONTES). Um ACK do próprio aplicativo poderá ser acrescentado no futuro para observabilidade e para acionar uma política de redundância, mas deverá ser assíncrono. Ausência de ACK não constitui prova suficiente para repetir indiscriminadamente o alerta e o workflow principal não deverá ficar bloqueado aguardando o telefone.
 
 ### 6.8 Cloudflare e domínio `poolsafe.app`
 
@@ -579,6 +617,17 @@ A confirmação da pausa pela API deve impedir a aceitação de novos eventos de
 5. A interrupção manual ou o limite de 30 segundos encerrará som e vibração e retirará o modo visual intrusivo, mantendo o alerta disponível em sua tela de detalhes e no Histórico.
 6. A prova local dos itens de reprodução foi concluída na Fatia 8A.1; os comportamentos de recepção e navegação pertencem à Fatia 9.
 
+### 9.8 Registro e atualização do dispositivo — implementado localmente
+
+1. O aplicativo obtém ou cria seu `poolSafeInstallationId` no SecureStore, separado dos dados de sessão.
+2. Depois da autenticação, consulta o estado de permissão de notificações.
+3. Com permissão concedida, obtém o token FCM nativo e chama `PUT /api/v1/devices/{installationId}`.
+4. A API cria ou atualiza idempotentemente a instalação, associa a sessão corrente e transfere de forma atômica um token que ainda esteja vinculado a outro registro.
+5. Mudanças futuras do token são sincronizadas pelo listener quando o runtime estiver ativo e pela consulta preventiva nos pontos de inicialização ou retomada definidos.
+6. Uma negativa explícita mantém a instalação conhecida com token nulo; o estado `undetermined` e as falhas transitórias não apagam o endereço remoto.
+7. No logout, a API invalida prioritariamente o dispositivo vinculado à sessão; o identificador enviado funciona apenas como fallback quando esse vínculo não existe.
+8. O aplicativo remove o registro local de notificações de forma defensiva, limpa somente os dados da sessão e preserva a identidade da instalação.
+
 ## 10. Stack do aplicativo
 
 - Expo com Development Build;
@@ -590,7 +639,7 @@ A confirmação da pausa pela API deve impedir a aceitação de novos eventos de
 - React Hook Form;
 - Zod;
 - Expo SecureStore;
-- `expo-notifications` para permissões, canal, diagnóstico, apresentação Android e futura integração FCM;
+- `expo-notifications` para permissões, canal, diagnóstico, apresentação Android, obtenção do token FCM nativo e observação de sua mudança;
 - módulo Expo local em Kotlin para Foreground Service, áudio e vibração de alarme crítico;
 - `expo-dev-client`.
 
@@ -615,6 +664,8 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 
 - nenhuma senha, token, chave privada, service account, IP público ou credencial deve ser versionado;
 - tokens de sessão ficam no SecureStore;
+- o identificador de instalação utiliza uma chave própria no SecureStore e não é removido pela limpeza da sessão;
+- tokens FCM e UUIDs completos não são apresentados na interface nem registrados em logs; o logger da API redige `req.body.fcmToken`;
 - a API nunca registra payloads completos de autenticação;
 - o MySQL, N8N e RabbitMQ não devem ser expostos ao aplicativo ou à Internet;
 - a API pública deverá utilizar HTTPS;
@@ -670,7 +721,7 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 | Histórico e detalhes de alerta | Concluída localmente de ponta a ponta e validada no Android |
 | Prontidão Android para alertas — Fatia 8A | Concluída como prova técnica; resultado degradado em aparelho físico |
 | Prova nativa de alarme crítico — Fatia 8A.1 | Concluída e validada com sucesso em aparelho Android físico |
-| Dispositivo e FCM Token | Pendente; próxima etapa planejada |
+| Dispositivo e FCM Token — Fatia 8B | Concluída e validada no Android, na API e no MySQL local |
 | Notificações | Pendente |
 | Definições, temas e refinamentos | Parcial/Pendente |
 | Integração e demonstração completa | Pendente |
@@ -680,7 +731,7 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 ### Aplicativo e conta
 
 - confirmação de e-mail no cadastro, em etapa futura separada;
-- dispositivo, FCM e notificações reais;
+- notificações FCM reais e navegação por alerta;
 - acionamento remoto da camada nativa nos diferentes estados do aplicativo;
 - validação sob Doze, prioridade efetiva do FCM e políticas específicas de fabricantes;
 - tela crítica interna, restauração de sessão e navegação por alerta;
@@ -688,7 +739,6 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 
 ### API e dados
 
-- endpoints de dispositivos;
 - implantação da API na VPS;
 - aplicação das migrations com `prisma migrate deploy`;
 - geração final e versionada do OpenAPI;
@@ -703,6 +753,9 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 - workflow definitivo do N8N;
 - bloqueio de eventos de risco quando não existir sessão `ATIVA` para a câmera;
 - integração FCM;
+- tratamento idempotente do resultado por `entrega_notificacao`, com distinção entre falhas transitórias e definitivas;
+- invalidação condicional do token utilizado na tentativa, sem apagar token renovado concorrentemente;
+- decisão futura sobre ACK assíncrono do aplicativo e canal redundante de alerta;
 - câmera RTSP e testes de latência;
 - containers definitivos do Python e da API;
 - backups, observabilidade e recuperação.
@@ -717,11 +770,14 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 - `api-contract.md`;
 - `app-requirements.md`;
 - `design-system.md`;
-- `PoolSafe_Plano_de_Fatias_Verticais_ATUALIZADO_08-10-2026.md`;
-- `Poolsafe_Processos_Pendentes_Mapeados-ATUALIZADO_08-10-2026.md`;
+- `PoolSafe_Plano_de_Fatias_Verticais_ATUALIZADO_09-10-2026.md`;
+- `Poolsafe_Processos_Pendentes_Mapeados-ATUALIZADO_09-10-2026.md`;
 - relatórios de conclusão das Etapas 2A, 2B e 2C;
 - relatórios de conclusão das Fatias 3A, 4, 5, 6 e 7;
 - relatório de conclusão da Fatia 3B;
 - relatório da Fatia 8A e validação em aparelho físico;
 - relatório de implementação da Fatia 8A.1, correções posteriores e validação em aparelho físico;
-- decisões confirmadas até 8 de outubro de 2026.
+- relatório de implementação e correções da Fatia 8B;
+- validação do token nativo no Android e dos registros de dispositivo no MySQL local;
+- `duvidas-tiradas-0910.txt`, aproveitado criticamente e com correções de escopo e garantias;
+- decisões confirmadas até 9 de outubro de 2026.

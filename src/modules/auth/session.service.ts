@@ -1,12 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
 import {
   SessionExpiredException,
   AuthenticationRequiredException,
 } from '../../common/errors/problem-details.exception.js';
 import type { AuthenticatedUser } from './interfaces/authenticated-user.interface.js';
+import { invalidateDevices, normalizeInstallationId } from '../devices/device-state.util.js';
 
 export type PrismaTransactionClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
@@ -34,7 +35,9 @@ export interface RotateSessionResult {
  * - Rotação transacional com bloqueio MySQL (SELECT ... FOR UPDATE)
  * - Reutilização de token anterior detectada revoga a sessão inteira
  * - Revogação é commitada antes de retornar o erro
- * - dispositivo_id permanece NULL nesta etapa
+ * - dispositivo_id permanece NULL até o aplicativo registrar a instalação (PUT /devices/{installationId}),
+ *   momento em que a sessão passa a referenciar o dispositivo
+ * - Logout revoga a sessão e invalida a instalação correspondente na mesma transação
  */
 @Injectable()
 export class SessionService {
@@ -269,20 +272,22 @@ export class SessionService {
    *
    * Exige que o segredo apresentado coincida com o hash da sessão antes de revogar,
    * impedindo que tokens forjados com sessionId válido causem revogação abusiva.
+   *
+   * Na mesma transação, invalida a instalação referenciada pela sessão e, quando informado e
+   * válido, o `installationId` do próprio usuário (derivado da sessão, nunca de outra conta).
+   * A revogação da sessão ocorre antes da invalidação, na mesma ordem de bloqueio usada por
+   * PUT /devices, de modo que um registro atrasado autenticado por esta sessão seja rejeitado
+   * e jamais reative o dispositivo.
    */
-  async revokeSession(rawRefreshToken: string): Promise<void> {
+  async revokeSession(rawRefreshToken: string, installationId?: string | null): Promise<void> {
     try {
       const { sessionId, secret } = this.parseRefreshToken(rawRefreshToken);
       const session = await this.prisma.getClient().authSession.findUnique({
         where: { id: sessionId },
-        select: { id: true, tokenHash: true, revokedAt: true },
+        select: { id: true, tokenHash: true, revokedAt: true, userId: true },
       });
 
       if (!session) {
-        return;
-      }
-
-      if (session.revokedAt !== null) {
         return;
       }
 
@@ -292,12 +297,45 @@ export class SessionService {
         Buffer.from(session.tokenHash, 'hex'),
       );
 
-      if (matches) {
-        await this.prisma.getClient().authSession.update({
-          where: { id: sessionId },
-          data: { revokedAt: new Date() },
-        });
+      if (!matches) {
+        return;
       }
+
+      const normalizedInstallationId = normalizeInstallationId(installationId);
+      const now = new Date();
+
+      await this.prisma.getClient().$transaction(async (tx) => {
+        if (session.revokedAt === null) {
+          await tx.authSession.updateMany({
+            where: { id: sessionId, revokedAt: null },
+            data: { revokedAt: now },
+          });
+        }
+
+        // Relê o vínculo após o bloqueio da linha da sessão para enxergar um PUT concluído
+        // imediatamente antes da revogação.
+        const current = await tx.authSession.findUnique({
+          where: { id: sessionId },
+          select: { deviceId: true },
+        });
+
+        // Localização estrita do dispositivo para invalidação:
+        // 1. Se a sessão possui deviceId vinculado, invalida EXCLUSIVAMENTE esse dispositivo.
+        // 2. Se a sessão não possui vínculo, utiliza o installationId informado como fallback.
+        let target: Prisma.DeviceWhereInput | null = null;
+        if (current?.deviceId) {
+          target = { id: current.deviceId, userId: session.userId };
+        } else if (normalizedInstallationId) {
+          target = {
+            userId: session.userId,
+            installationIdentifier: normalizedInstallationId,
+          };
+        }
+
+        if (target) {
+          await invalidateDevices(tx, target, now);
+        }
+      });
     } catch {
       // Idempotência: mesmo se o token for malformado ou inexistente, logout conclui sem erro
     }

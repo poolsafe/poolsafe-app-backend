@@ -14,6 +14,7 @@ import { HomeModule } from './modules/home/home.module.js';
 import { CamerasModule } from './modules/cameras/cameras.module.js';
 import { MonitoringsModule } from './modules/monitorings/monitorings.module.js';
 import { AlertsModule } from './modules/alerts/alerts.module.js';
+import { DevicesModule } from './modules/devices/devices.module.js';
 
 function validateEnv(config: Record<string, unknown>): EnvConfig {
   const validated = plainToInstance(EnvConfig, config, {
@@ -55,6 +56,12 @@ function validateEnv(config: Record<string, unknown>): EnvConfig {
           process.env['NODE_ENV'] !== 'production'
             ? { target: 'pino-pretty' }
             : undefined,
+        serializers: {
+          req: (req: Record<string, unknown> & { raw: { body?: unknown } }) => {
+            req['body'] = req.raw?.body;
+            return req;
+          },
+        },
         redact: [
           'req.headers.authorization',
           'req.headers.cookie',
@@ -63,6 +70,7 @@ function validateEnv(config: Record<string, unknown>): EnvConfig {
           'req.body.newPassword',
           'req.body.refreshToken',
           'req.body.token',
+          'req.body.fcmToken',
         ],
       },
     }),
@@ -75,6 +83,7 @@ function validateEnv(config: Record<string, unknown>): EnvConfig {
     CamerasModule,
     MonitoringsModule,
     AlertsModule,
+    DevicesModule,
   ],
 })
 export class AppModule {}

@@ -233,6 +233,6 @@ export class AuthService {
    * Encerramento da sessão (logout) idempotente.
    */
   async logout(dto: LogoutDto): Promise<void> {
-    await this.sessionService.revokeSession(dto.refreshToken);
+    await this.sessionService.revokeSession(dto.refreshToken, dto.installationId);
   }
 }

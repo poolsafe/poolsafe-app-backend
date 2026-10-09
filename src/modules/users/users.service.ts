@@ -8,6 +8,7 @@ import {
 } from '../../common/errors/problem-details.exception.js';
 import type { UpdateProfileDto } from './dto/update-profile.dto.js';
 import type { UpdatePasswordDto } from './dto/update-password.dto.js';
+import { invalidateDevices } from '../devices/device-state.util.js';
 
 export interface UserProfileResponse {
   data: {
@@ -177,28 +178,22 @@ export class UsersService {
 
       // 4. Invalidação de outros dispositivos
       if (currentSession?.deviceId) {
-        await tx.device.updateMany({
-          where: {
+        await invalidateDevices(
+          tx,
+          {
             userId,
             id: { not: currentSession.deviceId },
-            active: true,
           },
-          data: {
-            active: false,
-            invalidatedAt: now,
-          },
-        });
+          now,
+        );
       } else {
-        await tx.device.updateMany({
-          where: {
+        await invalidateDevices(
+          tx,
+          {
             userId,
-            active: true,
           },
-          data: {
-            active: false,
-            invalidatedAt: now,
-          },
-        });
+          now,
+        );
       }
     });
 
