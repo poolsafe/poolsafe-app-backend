@@ -33,3 +33,6 @@ Thumbs.db
 *.ntvs*
 *.njsproj
 *.sln
+
+# Imagem Docker
+poolsafe-api-9a-20261009-e2da7dc.tar
