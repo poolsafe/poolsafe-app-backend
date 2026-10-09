@@ -33,6 +33,3 @@ Thumbs.db
 *.ntvs*
 *.njsproj
 *.sln
-
-# Docker
-.dockerignore
