@@ -1,0 +1,51 @@
+name: poolsafe-api
+
+# Stack Docker / Portainer para execução permanente da API PoolSafe na VPS
+# Compatível com Portainer CE (Docker Standalone)
+# Não contém serviços auxiliares (MySQL e N8N executam em containers/stacks separados)
+
+services:
+  api:
+    image: ${API_IMAGE:-poolsafe-api:9a-20261009-e2da7dc}
+    container_name: poolsafe-api
+    restart: unless-stopped
+    ports:
+      # Publicação vinculada exclusivamente à interface de loopback (127.0.0.1) da VPS.
+      # A exposição pública com HTTPS será configurada em etapa posterior via Cloudflare Tunnel (api.poolsafe.app -> http://127.0.0.1:3000).
+      - "127.0.0.1:${PORT:-3000}:${PORT:-3000}"
+    networks:
+      - poolsafe-network
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-3000}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL obrigatoria}
+      JWT_PRIVATE_KEY_BASE64: ${JWT_PRIVATE_KEY_BASE64:?JWT_PRIVATE_KEY_BASE64 obrigatoria}
+      JWT_PUBLIC_KEY_BASE64: ${JWT_PUBLIC_KEY_BASE64:?JWT_PUBLIC_KEY_BASE64 obrigatoria}
+      ALERT_CURSOR_SECRET: ${ALERT_CURSOR_SECRET:?ALERT_CURSOR_SECRET obrigatoria}
+      RESEND_API_KEY: ${RESEND_API_KEY:?RESEND_API_KEY obrigatoria}
+      JWT_ISSUER: ${JWT_ISSUER:-poolsafe-api}
+      THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100}
+      THROTTLE_TTL_SECONDS: ${THROTTLE_TTL_SECONDS:-60}
+      CAMERA_OFFLINE_THRESHOLD_SECONDS: ${CAMERA_OFFLINE_THRESHOLD_SECONDS:-90}
+      EMAIL_FROM: "${EMAIL_FROM:-PoolSafe <nao-responda@send.poolsafe.app>}"
+      EMAIL_LOGO_URL: "${EMAIL_LOGO_URL:-https://poolsafe.app/assets/poolsafe-email-logo.png}"
+      PASSWORD_RESET_TOKEN_TTL_MINUTES: ${PASSWORD_RESET_TOKEN_TTL_MINUTES:-15}
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/api/v1/health/ready').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  poolsafe-network:
+    external: true

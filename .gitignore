@@ -4,8 +4,12 @@ dist/
 
 # Variáveis de ambiente com segredos reais
 .env
-.env.local
-.env.*.local
+.env.*
+*.env
+*.env.*
+!.env.example
+!*.env.example
+!**/.env.example
 
 # Chaves e credenciais (nunca versionar)
 *.pem
