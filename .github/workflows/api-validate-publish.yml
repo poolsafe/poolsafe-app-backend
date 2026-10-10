@@ -72,11 +72,11 @@ jobs:
       - name: Executar linter (oxlint)
         run: npm run lint
 
-      - name: Executar checagem de tipos (tsc)
-        run: npm run typecheck
-
       - name: Compilar API (nest build)
         run: npm run build
+
+      - name: Executar checagem de tipos (tsc)
+        run: npm run typecheck
 
       - name: Executar testes automatizados (unitários e integração)
         run: npm test
