@@ -61,7 +61,7 @@ jobs:
           echo "DATABASE_URL=mysql://poolsafe_ci:poolsafe_ci_password@127.0.0.1:3306/poolsafe_test" >> $GITHUB_ENV
           echo "ALERT_CURSOR_SECRET=ci-temporary-alerts-cursor-secret-32-chars-long" >> $GITHUB_ENV
           echo "JWT_ISSUER=poolsafe-api" >> $GITHUB_ENV
-          echo "NODE_ENV=test" >> $GITHUB_ENV
+          echo "NODE_ENV=development" >> $GITHUB_ENV
 
       - name: Aplicar migrations no MySQL temporário de CI
         run: npx prisma migrate deploy
