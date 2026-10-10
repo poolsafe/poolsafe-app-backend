@@ -6,7 +6,7 @@ name: poolsafe-api
 
 services:
   api:
-    image: ${API_IMAGE:-poolsafe-api:9a-20261009-e2da7dc}
+    image: ${API_IMAGE:?API_IMAGE obrigatoria}
     container_name: poolsafe-api
     restart: unless-stopped
     ports:

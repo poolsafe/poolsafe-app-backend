@@ -1,0 +1,123 @@
+name: API — Validação e Publicação
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  validate:
+    name: Validar API
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci_test_root_password
+          MYSQL_DATABASE: poolsafe_test
+          MYSQL_USER: poolsafe_ci
+          MYSQL_PASSWORD: poolsafe_ci_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -pci_test_root_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Instalar dependências (npm ci)
+        run: npm ci
+
+      - name: Gerar chaves RSA e variáveis de teste descartáveis
+        run: |
+          node -e "
+            const crypto = require('node:crypto');
+            const fs = require('node:fs');
+            const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
+              modulusLength: 2048,
+              publicKeyEncoding: { type: 'spki', format: 'pem' },
+              privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+            });
+            const privB64 = Buffer.from(privateKey).toString('base64');
+            const pubB64 = Buffer.from(publicKey).toString('base64');
+            fs.appendFileSync(process.env.GITHUB_ENV, 'JWT_PRIVATE_KEY_BASE64=' + privB64 + '\nJWT_PUBLIC_KEY_BASE64=' + pubB64 + '\n');
+          "
+          echo "DATABASE_URL=mysql://poolsafe_ci:poolsafe_ci_password@127.0.0.1:3306/poolsafe_test" >> $GITHUB_ENV
+          echo "ALERT_CURSOR_SECRET=ci-temporary-alerts-cursor-secret-32-chars-long" >> $GITHUB_ENV
+          echo "JWT_ISSUER=poolsafe-api" >> $GITHUB_ENV
+          echo "NODE_ENV=test" >> $GITHUB_ENV
+
+      - name: Aplicar migrations no MySQL temporário de CI
+        run: npx prisma migrate deploy
+
+      - name: Validar schema Prisma
+        run: npm run prisma:validate
+
+      - name: Executar linter (oxlint)
+        run: npm run lint
+
+      - name: Executar checagem de tipos (tsc)
+        run: npm run typecheck
+
+      - name: Compilar API (nest build)
+        run: npm run build
+
+      - name: Executar testes automatizados (unitários e integração)
+        run: npm test
+
+  publish:
+    name: Publicar Imagem Docker no GHCR
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Autenticar no GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extrair metadados e tags da imagem
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/poolsafe/poolsafe-app-backend
+          tags: |
+            type=raw,value=main
+            type=raw,value=sha-${{ github.sha }}
+
+      - name: Construir e publicar imagem Docker (linux/amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
