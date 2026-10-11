@@ -104,5 +104,13 @@ export class EnvConfig {
   @IsOptional()
   @IsString()
   ALERT_CURSOR_SECRET: string = 'poolsafe-alerts-cursor-secret-default';
+
+  /**
+   * Chave de autenticação de serviço para comunicação interna N8N -> API (Fatia 9B).
+   * Separada das credenciais dos usuários.
+   */
+  @IsOptional()
+  @IsString()
+  INTERNAL_SERVICE_KEY?: string;
 }
 

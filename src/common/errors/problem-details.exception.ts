@@ -234,3 +234,80 @@ export class EvidenceUnavailableException extends ProblemDetailsException {
   }
 }
 
+export class InvalidServiceSecretException extends ProblemDetailsException {
+  constructor(detail = 'Chave de serviço interno ausente ou inválida.') {
+    super({
+      status: HttpStatus.UNAUTHORIZED,
+      code: 'INVALID_SERVICE_SECRET',
+      title: 'Autenticação de serviço inválida',
+      detail,
+    });
+  }
+}
+
+export class CameraNotFoundException extends ProblemDetailsException {
+  constructor(detail = 'Câmera não encontrada para o código informado.') {
+    super({
+      status: HttpStatus.NOT_FOUND,
+      code: 'CAMERA_NOT_FOUND',
+      title: 'Câmera não encontrada',
+      detail,
+    });
+  }
+}
+
+export class ActiveMonitoringNotFoundException extends ProblemDetailsException {
+  constructor(detail = 'Nenhum monitoramento ativo encontrado para a câmera informada.') {
+    super({
+      status: HttpStatus.CONFLICT,
+      code: 'ACTIVE_MONITORING_NOT_FOUND',
+      title: 'Monitoramento ativo não encontrado',
+      detail,
+    });
+  }
+}
+
+export class ActiveMonitoringAmbiguousException extends ProblemDetailsException {
+  constructor(detail = 'Ambiguidade: múltiplas sessões ativas encontradas para a câmera informada.') {
+    super({
+      status: HttpStatus.CONFLICT,
+      code: 'ACTIVE_MONITORING_AMBIGUOUS',
+      title: 'Monitoramento ativo ambíguo',
+      detail,
+    });
+  }
+}
+
+export class EvidenceTooLargeException extends ProblemDetailsException {
+  constructor(detail = 'A evidência informada excede o limite máximo permitido de 5 MiB.') {
+    super({
+      status: HttpStatus.PAYLOAD_TOO_LARGE,
+      code: 'EVIDENCE_TOO_LARGE',
+      title: 'Evidência muito grande',
+      detail,
+    });
+  }
+}
+
+export class UnsupportedEvidenceTypeException extends ProblemDetailsException {
+  constructor(detail = 'Tipo MIME de evidência não suportado. Utilize image/jpeg ou image/png.') {
+    super({
+      status: HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+      code: 'UNSUPPORTED_EVIDENCE_TYPE',
+      title: 'Tipo de evidência não suportado',
+      detail,
+    });
+  }
+}
+
+export class InvalidRiskEventException extends ProblemDetailsException {
+  constructor(detail = 'O evento de risco contém dados inválidos ou inconsistentes.') {
+    super({
+      status: HttpStatus.UNPROCESSABLE_ENTITY,
+      code: 'INVALID_RISK_EVENT',
+      title: 'Evento de risco inválido',
+      detail,
+    });
+  }
+}
+
