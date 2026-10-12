@@ -1,9 +1,12 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -16,14 +19,19 @@ import {
 } from '@nestjs/swagger';
 import { InternalServiceGuard } from '../auth/guards/internal-service.guard.js';
 import { InternalAlertsService } from './internal-alerts.service.js';
+import { InternalDeliveriesService } from './internal-deliveries.service.js';
 import { CreateInternalAlertDto } from './dto/create-internal-alert.dto.js';
 import { InternalAlertResponseDto } from './dto/internal-alert-response.dto.js';
+import { InternalDeliveriesListResponseDto } from './dto/internal-deliveries-list.dto.js';
 
 @ApiTags('Internal Alerts')
 @Controller('internal/alerts')
 @UseGuards(InternalServiceGuard)
 export class InternalAlertsController {
-  constructor(private readonly internalAlertsService: InternalAlertsService) {}
+  constructor(
+    private readonly internalAlertsService: InternalAlertsService,
+    private readonly internalDeliveriesService: InternalDeliveriesService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.ACCEPTED)
@@ -80,4 +88,41 @@ export class InternalAlertsController {
     const requestId = (req.headers['x-request-id'] as string) || '';
     return this.internalAlertsService.processAlertEvent(dto, requestId);
   }
+
+  @Get(':alertId/deliveries')
+  @ApiOperation({
+    summary: 'Obter as entregas associadas a um alerta aceito (N8N -> API)',
+    description:
+      'Retorna todas as entregas do alerta, permitindo filtrar por status (ex: PENDENTE) ' +
+      'para orquestração do envio FCM pelo N8N.',
+  })
+  @ApiHeader({
+    name: 'X-Internal-Service-Key',
+    description:
+      'Chave secreta configurada no ambiente para autenticação de serviço entre N8N e API',
+    required: false,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de entregas do alerta retornada com sucesso.',
+    type: InternalDeliveriesListResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Chave de autenticação de serviço ausente ou inválida.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Alerta não encontrado.',
+  })
+  async getAlertDeliveries(
+    @Param('alertId') alertId: string,
+    @Query('status') status?: string,
+  ): Promise<InternalDeliveriesListResponseDto> {
+    return this.internalDeliveriesService.getDeliveriesByAlertId(
+      alertId,
+      status,
+    );
+  }
 }
+

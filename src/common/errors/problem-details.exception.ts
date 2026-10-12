@@ -311,3 +311,37 @@ export class InvalidRiskEventException extends ProblemDetailsException {
   }
 }
 
+export class AlertNotFoundException extends ProblemDetailsException {
+  constructor(detail = 'Alerta não encontrado para o identificador informado.') {
+    super({
+      status: HttpStatus.NOT_FOUND,
+      code: 'ALERT_NOT_FOUND',
+      title: 'Alerta não encontrado',
+      detail,
+    });
+  }
+}
+
+export class DeliveryNotFoundException extends ProblemDetailsException {
+  constructor(detail = 'Entrega de notificação não encontrada para o identificador informado.') {
+    super({
+      status: HttpStatus.NOT_FOUND,
+      code: 'DELIVERY_NOT_FOUND',
+      title: 'Entrega não encontrada',
+      detail,
+    });
+  }
+}
+
+export class NotificationNotFoundException extends ProblemDetailsException {
+  constructor(detail = 'Notificação não encontrada para o identificador informado.') {
+    super({
+      status: HttpStatus.NOT_FOUND,
+      code: 'NOTIFICATION_NOT_FOUND',
+      title: 'Notificação não encontrada',
+      detail,
+    });
+  }
+}
+
+
