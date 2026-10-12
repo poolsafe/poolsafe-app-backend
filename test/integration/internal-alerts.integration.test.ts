@@ -20,6 +20,7 @@ let prisma: PrismaService;
 
 const TEST_SERVICE_KEY =
   process.env['INTERNAL_SERVICE_KEY'] || 'poolsafe-internal-service-secret-local-dev';
+process.env['INTERNAL_SERVICE_KEY'] = TEST_SERVICE_KEY;
 
 function assertLocalTestDatabase(rawUrl: string): void {
   const url = new URL(rawUrl);
