@@ -2,8 +2,10 @@
 
 > Documento técnico canônico para orientar o desenvolvimento, a integração e a documentação do PoolSafe.
 
-**Última consolidação:** 11 de outubro de 2026  
+**Última consolidação:** 18 de outubro de 2026  
 **Escopo desta versão:** arquitetura geral, domínio público e camada Cloudflare, infraestrutura da VPS, mensageria planejada, aplicativo mobile, API Node.js em produção, CI/CD, GHCR, Portainer, release Android assinado, e-mail transacional, persistência MySQL, conectividade das câmeras, histórico de alertas, evidências, prontidão Android, identidade da instalação, token FCM e estado das fatias de implementação.
+
+**Recorte desta atualização:** somente o checkpoint de entrada, consulta, retenção e expurgo de evidências, validado em 18/10/2026. Não consolida as Tasks da Fatia 9B nem declara seu encerramento. As demais referências de implementação dessa fatia preservam o marco anterior e devem ser acompanhadas pelo checklist vigente até a consolidação final.
 
 ## 1. Finalidade e uso
 
@@ -351,11 +353,15 @@ O módulo de monitoramentos autoriza cada operação sobre todas as câmeras da 
 
 O módulo de alertas entrega um histórico paginado e estável, detalhes autorizados e a evidência disponível. A autorização utiliza `alerta_destinatario`, que registra quem podia receber o alerta no momento da detecção; por isso, mudanças posteriores no acesso à câmera não apagam o histórico do usuário. A evidência é transmitida pela própria API em resposta autenticada, sem URL pública, e estados de ausência, expiração e remoção são comunicados sem impedir a consulta dos demais dados do alerta. A paginação utiliza cursor opaco protegido por segredo próprio da aplicação.
 
+O checkpoint de evidências acrescentou validação remota do registro JSON em `POST /api/v1/internal/alerts`, com `evidence` opcional contendo MIME type e Base64 puro. A API valida a imagem e grava bytes no `LONGBLOB` de `evidencia_alerta`, junto de tamanho, SHA-256 e expiração em criação + 30 dias. Evidência inválida é descartada com motivo sanitizado em `log_sistema`, sem impedir o registro do evento central válido, autenticado e elegível. Isso não converte falhas de banco em sucesso nem dispensa a barreira de monitoramento ativo.
+
+O parser aceita até 10 MiB no caminho interno e mantém 100 KiB nas rotas públicas/de usuário, segundo a implementação relatada. A imagem decodificada continua limitada a 5 MiB; excesso do corpo HTTP pode ser rejeitado antes do tratamento tolerante. JPEG e PNG são aceitos, com validação de sintaxe, tamanho e assinatura; essa checagem não garante integridade visual completa.
+
 O módulo de dispositivos registra ou atualiza idempotentemente a combinação usuário/instalação e nunca devolve o FCM Token. Um token já associado é transferido de forma atômica antes do novo vínculo, respeitando a unicidade do banco. O corpo sensível é ocultado pelo logger. O logout invalida prioritariamente o dispositivo ligado à própria sessão e utiliza o `installationId` informado apenas quando essa associação não existe; um identificador divergente não desativa outro aparelho da conta. A troca autenticada de senha preserva o dispositivo atual e invalida os demais, enquanto a redefinição por recuperação invalida todos.
 
 O runtime de produção é entregue por imagem Docker privada do GHCR para `linux/amd64`. A imagem executa como usuário não privilegiado, contém o schema e o histórico de migrations necessário a operações controladas e não contém arquivos `.env`. A Stack do Portainer exige `API_IMAGE`, conecta a API à rede externa `poolsafe-network`, utiliza o hostname interno do MySQL, publica `3000` apenas no loopback da VPS e possui health check de prontidão e rotação limitada de logs.
 
-Confirmação de e-mail e o envio real de notificações continuam pendentes. A Fatia 3 foi dividida operacionalmente, e suas partes 3A e 3B estão concluídas.
+Confirmação de e-mail permanece pendente. A consolidação do envio real de notificações será feita no fechamento da Fatia 9B, fora deste recorte. A Fatia 3 foi dividida operacionalmente, e suas partes 3A e 3B estão concluídas.
 
 ### 6.3 Backend Python de visão computacional
 
@@ -400,6 +406,8 @@ O N8N deverá:
 - registrar resultados e falhas.
 
 A comunicação básica Webhook → N8N → MySQL já foi validada como prova de infraestrutura, mas não representa mais o transporte definitivo entre Python e N8N.
+
+No checkpoint de evidências, o N8N encaminha a imagem junto do evento à API, que realiza a persistência. O workflow **PoolSafe — Expurgo diário de evidências** foi criado e configurado para chamada diária ao endpoint interno autenticado `POST /api/v1/internal/alerts/purge-evidence`. A execução manual após expiração simulada foi validada pelo responsável. Esse workflow de manutenção está entregue; o produtor Python e o transporte RabbitMQ continuam futuros.
 
 ### 6.6 MySQL e Prisma
 
@@ -606,7 +614,7 @@ A confirmação de endereço de e-mail no cadastro permanece uma jornada futura 
 3. O N8N consome e valida a mensagem.
 4. Antes de aceitar o evento, o N8N precisa resolver exatamente uma sessão `ATIVA` que contenha a câmera.
 5. Sem sessão ativa, o evento não gera alerta de usuário nem entrega FCM; o descarte recebe registro operacional.
-6. Com a sessão ativa, o N8N persiste alerta, evidência e destinatários de forma idempotente.
+6. Com a sessão ativa, o N8N encaminha o evento à API, que persiste alerta, evidência válida opcional e destinatários de forma idempotente. A imagem inválida é descartada sem impedir um evento central válido.
 7. O N8N solicita o envio ao FCM.
 8. O aplicativo recebe a notificação.
 9. Ao abrir, o app consulta o conteúdo autorizado pela API.
@@ -633,7 +641,7 @@ A confirmação da pausa pela API deve impedir a aceitação de novos eventos de
 7. Não há desvinculação individual: uma composição diferente exige encerrar a sessão e iniciar outra.
 8. A interface somente reflete uma mudança depois da confirmação da API e atualiza os dados relacionados por invalidação das consultas.
 
-### 9.6 Consulta do histórico e da evidência — implementada localmente
+### 9.6 Consulta do histórico e da evidência — consulta existente e evidência validada remotamente no checkpoint
 
 1. O aplicativo solicita à API os alertas destinados ao usuário autenticado.
 2. A API consulta a autorização histórica registrada em `alerta_destinatario` e devolve os resultados do mais recente para o mais antigo.
@@ -673,6 +681,21 @@ A confirmação da pausa pela API deve impedir a aceitação de novos eventos de
 6. O Cloudflare Tunnel encaminha `https://api.poolsafe.app` para a origem local.
 7. Os health checks são verificados interna e externamente antes de liberar o consumo pelo aplicativo.
 8. O APK release usa sempre `https://api.poolsafe.app/api/v1` e valida as jornadas reais sem Metro Bundler nem servidor local.
+
+### 9.10 Ciclo da evidência — checkpoint concluído e validado
+
+1. No teste atual, um evento controlado no N8N inclui `evidence.mimeType` e `evidence.base64`; no pipeline futuro, o Python produzirá o frame e o RabbitMQ transportará o envelope até o N8N.
+2. A API valida a imagem, decodifica e grava um único frame binário por alerta. Base64 é somente transporte; não entra no FCM nem no armazenamento definitivo.
+3. A imagem fica disponível ao destinatário autenticado pelo endpoint de evidência já existente. Ausência ou descarte não impede a consulta do restante do alerta.
+4. A evidência expira em `criado_em + 30 dias`; a API bloqueia o conteúdo desde esse instante, antes de qualquer limpeza física.
+5. A rotina interna de expurgo trabalha por lotes, revalida os vencimentos e limpa `conteudo`, preenchendo `removida_em` atomicamente. O N8N agenda a manutenção diária.
+6. A repetição do evento não deve regravar nem restaurar imagem expurgada. Esse comportamento integra a implementação e os testes locais relatados pelo agente.
+
+O responsável confirmou na VPS e no aparelho a gravação, exibição, logs de falha da evidência sem impedir o alerta e remoção após expiração simulada. Os detalhes dos testes e medições estão no Processo 5 de **Processos Pendentes Mapeados**.
+
+Foi mantida a gravação conjunta, sem upload paralelo. A conversão de um PNG de 3.644.286 bytes para JPEG de 642.731 bytes reduziu as execuções observadas de aproximadamente 1,97 s para média de 1,181 s. São tempos do workflow completo de teste, não medição da detecção até o som no aparelho, nem garantia de latência. JPEG compacto é a preferência para o futuro produtor; tamanho e compressão definitivos serão ajustados com frames reais.
+
+O processo de evidências está concluído neste recorte. A retenção geral dos alertas e registros relacionados continua separada e pendente; a Fatia 9B permanece em andamento.
 
 ## 10. Stack do aplicativo
 
@@ -723,7 +746,9 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 - transições do monitoramento e seus eventos são atômicos e protegidos contra concorrência;
 - respostas não expõem stack, SQL ou topologia interna;
 - a consulta de um alerta ou de sua evidência exige que o usuário conste como destinatário histórico;
-- evidências são dados sensíveis, trafegam somente por resposta autenticada da API e não possuem URL pública;
+- a consulta de evidências é feita por resposta autenticada da API, sem URL pública; a entrada Base64 trafega apenas pelo caminho interno autorizado;
+- Base64 e bytes da evidência não devem aparecer em logs nem em históricos desnecessários do N8N;
+- a imagem expirada tem acesso bloqueado e seus bytes são limpos pela manutenção diária; isso não representa eliminação automática de cópias em backups ou logs;
 - o aplicativo não mantém evidências em armazenamento persistente nem oferece download ou compartilhamento no MVP;
 - e-mails de recuperação e confirmação não devem revelar a existência de uma conta;
 - credenciais do Resend devem existir apenas no ambiente seguro da API;
@@ -773,7 +798,7 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 | Prova nativa de alarme crítico — Fatia 8A.1 | Concluída e validada com sucesso em aparelho Android físico |
 | Dispositivo e FCM Token — Fatia 8B | Concluída e validada no Android, na API e no MySQL local |
 | Ambiente remoto e primeiro release — Fatia 9A | Concluída: CI/CD, GHCR, Portainer, API HTTPS e APK release validados |
-| Notificações e navegação por alerta — Fatia 9B | Pendente; próxima etapa funcional |
+| Notificações e navegação por alerta — Fatia 9B | Em andamento; Tasks não consolidadas nesta atualização. O checkpoint de evidências está concluído e a continuidade segue pelo checklist |
 | Definições, temas e refinamentos | Parcial/Pendente |
 | Integração e demonstração completa | Pendente |
 
@@ -791,7 +816,7 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 ### API e dados
 
 - geração final e versionada do OpenAPI;
-- retenção e expurgo de evidências.
+- retenção geral de alertas, destinatários, notificações e entregas; o expurgo dos bytes de evidências foi concluído no checkpoint de 18/10/2026.
 
 ### Operação e segurança
 
@@ -823,12 +848,12 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 - `PoolSafe_Infra_Contabo_ATUALIZADO_11-10-2026.md`;
 - `database-schema.md`;
 - `domain-model.md`;
-- `api-contract.md`;
+- `api-contract_ATUALIZADO_18-10-2026.md`;
 - `app-requirements.md`;
 - `design-system.md`;
 - `PoolSafe_Plano_de_Fatias_Verticais_ATUALIZADO_11-10-2026.md`;
 - `PoolSafe_Mapeamento_CI-CD_ATUALIZADO_11-10-2026.md`;
-- `Poolsafe_Processos_Pendentes_Mapeados-ATUALIZADO_11-10-2026.md`;
+- `Poolsafe_Processos_Pendentes_Mapeados-ATUALIZADO_18-10-2026.md`;
 - relatórios de conclusão das Etapas 2A, 2B e 2C;
 - relatórios de conclusão das Fatias 3A, 4, 5, 6 e 7;
 - relatório de conclusão da Fatia 3B;
@@ -840,4 +865,5 @@ Tokens não podem ser persistidos em AsyncStorage. Dados remotos e estado local 
 - validação do workflow no GitHub, do pacote privado no GHCR, da Stack no Portainer, do Tunnel da API e dos health checks internos e externos;
 - inspeção da assinatura e do bundle do APK release, seguida de validação funcional em aparelho físico;
 - `duvidas-tiradas-0910.txt`, aproveitado criticamente e com correções de escopo e garantias;
-- decisões confirmadas até 11 de outubro de 2026.
+- decisões confirmadas até 11 de outubro de 2026 na consolidação ampla anterior;
+- relatório de implementação do complemento de evidências e validações remotas relatadas pelo responsável em 18/10/2026, sem fechamento das Tasks da Fatia 9B.

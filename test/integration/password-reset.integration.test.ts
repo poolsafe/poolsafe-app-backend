@@ -169,6 +169,10 @@ describe('Fatia 3B — Recuperação e Redefinição de Senha', () => {
         name: 'Usuario Recuperacao',
         email: testEmail,
         password: initialPassword,
+        termsAccepted: true,
+        termsVersion: '1.0',
+        privacyAware: true,
+        privacyVersion: '1.0',
       }),
     });
     assert.equal(regRes.status, 201);

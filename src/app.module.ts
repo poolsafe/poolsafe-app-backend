@@ -15,6 +15,7 @@ import { CamerasModule } from './modules/cameras/cameras.module.js';
 import { MonitoringsModule } from './modules/monitorings/monitorings.module.js';
 import { AlertsModule } from './modules/alerts/alerts.module.js';
 import { DevicesModule } from './modules/devices/devices.module.js';
+import { LegalModule } from './modules/legal/legal.module.js';
 
 function validateEnv(config: Record<string, unknown>): EnvConfig {
   const validated = plainToInstance(EnvConfig, config, {
@@ -74,6 +75,8 @@ function validateEnv(config: Record<string, unknown>): EnvConfig {
           'req.body.token',
           'req.body.fcmToken',
           'req.body.evidence.base64',
+          'req.body.phone',
+          'req.body.telefone',
         ],
       },
     }),
@@ -87,6 +90,7 @@ function validateEnv(config: Record<string, unknown>): EnvConfig {
     MonitoringsModule,
     AlertsModule,
     DevicesModule,
+    LegalModule,
   ],
 })
 export class AppModule {}

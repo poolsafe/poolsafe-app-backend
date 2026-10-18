@@ -196,7 +196,15 @@ describe('Fatia 5 — Câmeras autorizadas (GET /api/v1/cameras e /cameras/{came
     const regRes = await fetch(`${baseUrl}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({
+        name,
+        email,
+        password,
+        termsAccepted: true,
+        termsVersion: '1.0',
+        privacyAware: true,
+        privacyVersion: '1.0',
+      }),
     });
     assert.equal(regRes.status, 201, 'Cadastro deve retornar 201');
     const regJson = (await regRes.json()) as any;

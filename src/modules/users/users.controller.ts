@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Patch,
   Put,
   Body,
@@ -17,6 +18,7 @@ import type { AuthenticatedUser } from '../auth/interfaces/authenticated-user.in
 import { UsersService } from './users.service.js';
 import { UpdateProfileDto } from './dto/update-profile.dto.js';
 import { UpdatePasswordDto } from './dto/update-password.dto.js';
+import { RegisterManifestationsDto } from './dto/register-manifestations.dto.js';
 
 @ApiTags('Users')
 @ApiBearerAuth()
@@ -26,16 +28,24 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get('me')
-  @ApiOperation({ summary: 'Consultar perfil do usuário autenticado' })
+  @ApiOperation({
+    summary: 'Consultar perfil do usuário autenticado',
+    description:
+      'Retorna identificação, telefone e situação atualizada das manifestações de Termos de Uso, Aviso de Privacidade e autorização de contato.',
+  })
   @ApiResponse({ status: 200, description: 'Perfil retornado com sucesso.' })
   @ApiResponse({ status: 401, description: 'Token ausente, inválido ou sessão revogada/expirada.' })
   getProfile(@CurrentUser() user: AuthenticatedUser, @Req() req: Request) {
     const requestId = (req.headers['x-request-id'] as string) || '';
-    return this.usersService.getProfile(user, requestId);
+    return this.usersService.getProfile(user.id, requestId);
   }
 
   @Patch('me')
-  @ApiOperation({ summary: 'Atualizar nome do usuário autenticado' })
+  @ApiOperation({
+    summary: 'Atualizar perfil do usuário autenticado',
+    description:
+      'Permite atualizar o nome, atualizar ou remover o telefone e gerenciar a autorização específica de contato. Preserva campos omitidos.',
+  })
   @ApiResponse({ status: 200, description: 'Perfil atualizado com sucesso.' })
   @ApiResponse({ status: 401, description: 'Token ausente, inválido ou sessão revogada/expirada.' })
   @ApiResponse({ status: 422, description: 'Dados de validação incorretos ou campos desconhecidos.' })
@@ -46,6 +56,25 @@ export class UsersController {
   ) {
     const requestId = (req.headers['x-request-id'] as string) || '';
     return this.usersService.updateProfile(user.id, dto, requestId);
+  }
+
+  @Post('me/manifestations')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Registrar aceite e ciência para contas existentes',
+    description:
+      'Operação autenticada e idempotente para contas existentes registrarem aceite dos Termos de Uso e ciência do Aviso de Privacidade, preservando o horário original.',
+  })
+  @ApiResponse({ status: 200, description: 'Manifestações registradas com sucesso.' })
+  @ApiResponse({ status: 401, description: 'Token ausente, inválido ou sessão revogada/expirada.' })
+  @ApiResponse({ status: 422, description: 'Versão inválida ou desatualizada.' })
+  registerManifestations(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: RegisterManifestationsDto,
+    @Req() req: Request,
+  ) {
+    const requestId = (req.headers['x-request-id'] as string) || '';
+    return this.usersService.registerManifestations(user.id, dto, requestId);
   }
 
   @Put('me/password')

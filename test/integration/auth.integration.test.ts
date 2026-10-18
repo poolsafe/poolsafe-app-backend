@@ -150,6 +150,10 @@ describe('Etapa 2B — Autenticação e Sessões', () => {
         name: `   ${testName}   `,
         email: `   ${testEmail.toUpperCase()}   `,
         password: testPassword,
+        termsAccepted: true,
+        termsVersion: '1.0',
+        privacyAware: true,
+        privacyVersion: '1.0',
       }),
     });
 
@@ -229,6 +233,10 @@ describe('Etapa 2B — Autenticação e Sessões', () => {
         name: 'Outro Nome',
         email: testEmail,
         password: 'OutraSenha123!',
+        termsAccepted: true,
+        termsVersion: '1.0',
+        privacyAware: true,
+        privacyVersion: '1.0',
       }),
     });
 

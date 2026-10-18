@@ -11,16 +11,37 @@ import { LogoutDto } from './dto/logout.dto.js';
 import {
   InvalidCredentialsException,
   AccountCannotBeCreatedException,
+  ProblemDetailsException,
 } from '../../common/errors/problem-details.exception.js';
+import {
+  CURRENT_TERMS_VERSION,
+  CURRENT_PRIVACY_VERSION,
+  CURRENT_PHONE_CONTACT_VERSION,
+} from '../legal/legal.constants.js';
+import {
+  validateBrazilianPhone,
+  normalizeBrazilianPhone,
+} from '../../common/utils/phone.util.js';
+
+export interface AuthenticatedUserPayload {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  status: string;
+  termsVersion: string | null;
+  termsAcceptedAt: string | null;
+  privacyVersion: string | null;
+  privacyAwareAt: string | null;
+  phoneContactAuthorized: boolean;
+  phoneContactVersion: string | null;
+  phoneContactGrantedAt: string | null;
+  phoneContactRevokedAt: string | null;
+}
 
 export interface AuthenticatedResponse {
   data: {
-    user: {
-      id: string;
-      name: string;
-      email: string;
-      status: string;
-    };
+    user: AuthenticatedUserPayload;
     tokens: {
       tokenType: 'Bearer';
       accessToken: string;
@@ -63,12 +84,126 @@ export class AuthService {
 
   /**
    * Cadastro de novo usuário e emissão da primeira sessão autenticada.
+   *
+   * Valida e registra atomicamente o aceite dos Termos de Uso, a ciência do Aviso de
+   * Privacidade e o consentimento opcional de contato por telefone.
    */
   async register(dto: RegisterDto, requestId: string): Promise<AuthenticatedResponse> {
     const normalizedEmail = dto.email.trim().toLowerCase();
     const normalizedName = dto.name.trim();
 
-    // 1. Pré-verificação de existência do e-mail
+    // 1. Validação estrita das manifestações obrigatórias de Termos e Privacidade
+    if (dto.termsAccepted !== true) {
+      throw new ProblemDetailsException({
+        status: 422,
+        code: 'VALIDATION_ERROR',
+        title: 'Erro de validação',
+        detail: 'É necessário manifestar aceite dos Termos de Uso.',
+        errors: [
+          {
+            pointer: '/termsAccepted',
+            code: 'TERMS_NOT_ACCEPTED',
+            detail: 'É necessário aceitar os Termos de Uso para criar uma conta.',
+          },
+        ],
+      });
+    }
+
+    if (dto.termsVersion !== CURRENT_TERMS_VERSION) {
+      throw new ProblemDetailsException({
+        status: 422,
+        code: 'VALIDATION_ERROR',
+        title: 'Erro de validação',
+        detail: 'A versão dos Termos de Uso apresentada é inválida ou desatualizada.',
+        errors: [
+          {
+            pointer: '/termsVersion',
+            code: 'INVALID_TERMS_VERSION',
+            detail: `A versão vigente dos Termos de Uso é ${CURRENT_TERMS_VERSION}.`,
+          },
+        ],
+      });
+    }
+
+    if (dto.privacyAware !== true) {
+      throw new ProblemDetailsException({
+        status: 422,
+        code: 'VALIDATION_ERROR',
+        title: 'Erro de validação',
+        detail: 'É necessário declarar ciência do Aviso de Privacidade.',
+        errors: [
+          {
+            pointer: '/privacyAware',
+            code: 'PRIVACY_NOT_ACKNOWLEDGED',
+            detail: 'É necessário declarar ciência do Aviso de Privacidade para criar uma conta.',
+          },
+        ],
+      });
+    }
+
+    if (dto.privacyVersion !== CURRENT_PRIVACY_VERSION) {
+      throw new ProblemDetailsException({
+        status: 422,
+        code: 'VALIDATION_ERROR',
+        title: 'Erro de validação',
+        detail: 'A versão do Aviso de Privacidade apresentada é inválida ou desatualizada.',
+        errors: [
+          {
+            pointer: '/privacyVersion',
+            code: 'INVALID_PRIVACY_VERSION',
+            detail: `A versão vigente do Aviso de Privacidade é ${CURRENT_PRIVACY_VERSION}.`,
+          },
+        ],
+      });
+    }
+
+    // 2. Validação e normalização do telefone opcional
+    let normalizedPhone: string | null = null;
+    let phoneContactAuthorized = false;
+    let phoneContactVersion: string | null = null;
+    let phoneContactGrantedAt: Date | null = null;
+    const now = new Date();
+
+    if (dto.phoneContactAuthorized === true) {
+      if (!dto.phone || !dto.phone.trim()) {
+        throw new ProblemDetailsException({
+          status: 422,
+          code: 'VALIDATION_ERROR',
+          title: 'Erro de validação',
+          detail: 'Informe o telefone para autorizar o contato da equipe.',
+          errors: [
+            {
+              pointer: '/phone',
+              code: 'REQUIRED_FIELD',
+              detail: 'Informe o número do telefone com DDD.',
+            },
+          ],
+        });
+      }
+
+      if (!validateBrazilianPhone(dto.phone)) {
+        throw new ProblemDetailsException({
+          status: 422,
+          code: 'VALIDATION_ERROR',
+          title: 'Erro de validação',
+          detail: 'Número de telefone inválido.',
+          errors: [
+            {
+              pointer: '/phone',
+              code: 'INVALID_PHONE',
+              detail: 'Informe um telefone brasileiro válido com DDD (10 ou 11 dígitos).',
+            },
+          ],
+        });
+      }
+
+      normalizedPhone = normalizeBrazilianPhone(dto.phone);
+      phoneContactAuthorized = true;
+      phoneContactVersion = dto.phoneContactVersion ?? CURRENT_PHONE_CONTACT_VERSION;
+      phoneContactGrantedAt = now;
+    }
+
+    // 3. Pré-verificação de existência do e-mail
     const existing = await this.prisma.getClient().user.findUnique({
       where: { email: normalizedEmail },
       select: { id: true },
@@ -80,11 +215,11 @@ export class AuthService {
       );
     }
 
-    // 2. Hash da senha com Argon2id
+    // 4. Hash da senha com Argon2id
     const passwordHash = await this.hashService.hash(dto.password);
 
     try {
-      // 3. Criação do usuário e da sessão inicial em transação
+      // 5. Criação do usuário e da sessão inicial em transação atômica única
       const { user, sessionResult } = await this.prisma.getClient().$transaction(async (tx) => {
         const createdUser = await tx.user.create({
           data: {
@@ -92,6 +227,15 @@ export class AuthService {
             email: normalizedEmail,
             passwordHash,
             status: 'ATIVO',
+            phone: normalizedPhone,
+            termsVersion: CURRENT_TERMS_VERSION,
+            termsAcceptedAt: now,
+            privacyVersion: CURRENT_PRIVACY_VERSION,
+            privacyAwareAt: now,
+            phoneContactAuthorized,
+            phoneContactVersion,
+            phoneContactGrantedAt,
+            phoneContactRevokedAt: null,
           },
         });
 
@@ -100,7 +244,7 @@ export class AuthService {
         return { user: createdUser, sessionResult: createdSession };
       });
 
-      // 4. Emissão do Access Token JWT RS256
+      // 6. Emissão do Access Token JWT RS256
       const tokenResult = this.tokenService.generateAccessToken(
         user.id.toString(),
         sessionResult.sessionId,
@@ -112,7 +256,16 @@ export class AuthService {
             id: user.id.toString(),
             name: user.name,
             email: user.email,
+            phone: user.phone,
             status: user.status,
+            termsVersion: user.termsVersion,
+            termsAcceptedAt: user.termsAcceptedAt?.toISOString() ?? null,
+            privacyVersion: user.privacyVersion,
+            privacyAwareAt: user.privacyAwareAt?.toISOString() ?? null,
+            phoneContactAuthorized: user.phoneContactAuthorized,
+            phoneContactVersion: user.phoneContactVersion,
+            phoneContactGrantedAt: user.phoneContactGrantedAt?.toISOString() ?? null,
+            phoneContactRevokedAt: user.phoneContactRevokedAt?.toISOString() ?? null,
           },
           tokens: {
             tokenType: 'Bearer',
@@ -186,7 +339,16 @@ export class AuthService {
           id: user.id.toString(),
           name: user.name,
           email: user.email,
+          phone: user.phone,
           status: user.status,
+          termsVersion: user.termsVersion,
+          termsAcceptedAt: user.termsAcceptedAt?.toISOString() ?? null,
+          privacyVersion: user.privacyVersion,
+          privacyAwareAt: user.privacyAwareAt?.toISOString() ?? null,
+          phoneContactAuthorized: user.phoneContactAuthorized,
+          phoneContactVersion: user.phoneContactVersion,
+          phoneContactGrantedAt: user.phoneContactGrantedAt?.toISOString() ?? null,
+          phoneContactRevokedAt: user.phoneContactRevokedAt?.toISOString() ?? null,
         },
         tokens: {
           tokenType: 'Bearer',

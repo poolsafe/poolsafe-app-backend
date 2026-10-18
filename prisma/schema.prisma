@@ -19,6 +19,15 @@ model User {
   updatedAt       DateTime  @default(now()) @updatedAt @map("atualizado_em") @db.DateTime(3)
   deactivatedAt   DateTime? @map("desativado_em") @db.DateTime(3)
 
+  termsVersion           String?   @map("termos_versao") @db.VarChar(20)
+  termsAcceptedAt        DateTime? @map("termos_aceitos_em") @db.DateTime(3)
+  privacyVersion         String?   @map("privacidade_versao") @db.VarChar(20)
+  privacyAwareAt         DateTime? @map("privacidade_ciente_em") @db.DateTime(3)
+  phoneContactAuthorized Boolean   @default(false) @map("contato_telefonico_autorizado")
+  phoneContactVersion    String?   @map("contato_telefonico_versao") @db.VarChar(20)
+  phoneContactGrantedAt  DateTime? @map("contato_telefonico_concedido_em") @db.DateTime(3)
+  phoneContactRevokedAt  DateTime? @map("contato_telefonico_revogado_em") @db.DateTime(3)
+
   devices             Device[]
   authSessions        AuthSession[]
   passwordResetTokens PasswordResetToken[]
