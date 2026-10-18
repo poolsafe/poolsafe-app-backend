@@ -1,5 +1,4 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
 import {
   Equals,
   IsEnum,
@@ -12,28 +11,21 @@ import {
   Max,
   MaxLength,
   Min,
-  ValidateNested,
 } from 'class-validator';
 
 export class InternalAlertEvidenceDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Tipo MIME da imagem capturada (image/jpeg ou image/png)',
     example: 'image/jpeg',
     enum: ['image/jpeg', 'image/png'],
   })
-  @IsString()
-  @IsEnum(['image/jpeg', 'image/png'], {
-    message: 'mimeType deve ser image/jpeg ou image/png',
-  })
-  mimeType!: 'image/jpeg' | 'image/png';
+  mimeType?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Conteúdo binário da imagem codificado em Base64 (máx. 5 MiB)',
     example: '/9j/4AAQSkZJRg...',
   })
-  @IsString()
-  @IsNotEmpty({ message: 'base64 não pode ser vazio' })
-  base64!: string;
+  base64?: string;
 }
 
 export class CreateInternalAlertDto {
@@ -132,9 +124,7 @@ export class CreateInternalAlertDto {
     type: InternalAlertEvidenceDto,
   })
   @IsOptional()
-  @ValidateNested()
-  @Type(() => InternalAlertEvidenceDto)
-  evidence?: InternalAlertEvidenceDto;
+  evidence?: unknown;
 
   @ApiPropertyOptional({
     description: 'Título snapshot opcional para a notificação',

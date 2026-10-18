@@ -23,6 +23,10 @@ import { InternalDeliveriesService } from './internal-deliveries.service.js';
 import { CreateInternalAlertDto } from './dto/create-internal-alert.dto.js';
 import { InternalAlertResponseDto } from './dto/internal-alert-response.dto.js';
 import { InternalDeliveriesListResponseDto } from './dto/internal-deliveries-list.dto.js';
+import {
+  PurgeEvidenceQueryDto,
+  PurgeEvidenceResponseDto,
+} from './dto/purge-evidence.dto.js';
 
 @ApiTags('Internal Alerts')
 @Controller('internal/alerts')
@@ -87,6 +91,40 @@ export class InternalAlertsController {
   ): Promise<InternalAlertResponseDto> {
     const requestId = (req.headers['x-request-id'] as string) || '';
     return this.internalAlertsService.processAlertEvent(dto, requestId);
+  }
+
+  @Post('purge-evidence')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Expurgo periódico de evidências vencidas (N8N / Manutenção -> API)',
+    description:
+      'Processa em lote ordenado as evidências cujo expira_em já foi alcançado, limpando atomicamente ' +
+      'o conteúdo binário (LONGBLOB) e preenchendo removida_em sem carregar blobs na memória.',
+  })
+  @ApiHeader({
+    name: 'X-Internal-Service-Key',
+    description:
+      'Chave secreta configurada no ambiente para autenticação de serviço entre N8N e API',
+    required: false,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Lote de expurgo executado com sucesso.',
+    type: PurgeEvidenceResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Chave de autenticação de serviço ausente ou inválida.',
+  })
+  async purgeExpiredEvidences(
+    @Query() query: PurgeEvidenceQueryDto,
+    @Req() req: Request,
+  ): Promise<PurgeEvidenceResponseDto> {
+    const requestId = (req.headers['x-request-id'] as string) || '';
+    return this.internalAlertsService.purgeExpiredEvidences(
+      query.limit,
+      requestId,
+    );
   }
 
   @Get(':alertId/deliveries')

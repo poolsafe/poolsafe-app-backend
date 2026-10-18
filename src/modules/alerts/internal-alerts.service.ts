@@ -7,12 +7,24 @@ import {
   ActiveMonitoringNotFoundException,
   CameraNotFoundException,
   CameraNotOperationalException,
-  EvidenceTooLargeException,
   InvalidRiskEventException,
-  UnsupportedEvidenceTypeException,
 } from '../../common/errors/problem-details.exception.js';
 import type { CreateInternalAlertDto } from './dto/create-internal-alert.dto.js';
 import type { InternalAlertResponseDto } from './dto/internal-alert-response.dto.js';
+import type { PurgeEvidenceResponseDto } from './dto/purge-evidence.dto.js';
+
+export interface ValidatedEvidence {
+  buffer: Buffer;
+  mimeType: 'image/jpeg' | 'image/png';
+  sizeBytes: bigint;
+  hashSha256: string;
+  expiresAt: Date;
+}
+
+export type EvidenceValidationResult =
+  | { status: 'VALID'; evidence: ValidatedEvidence }
+  | { status: 'DISCARDED'; reason: string; detail: string }
+  | { status: 'ABSENT' };
 
 @Injectable()
 export class InternalAlertsService {
@@ -256,42 +268,8 @@ export class InternalAlertsService {
             };
           }
 
-          // 5. Validar e preparar evidência opcional
-          let evidenceBuffer: Buffer | null = null;
-          let evidenceMimeType: string | null = null;
-          let evidenceSizeBytes: bigint | null = null;
-          let evidenceHashSha256: string | null = null;
-          let evidenceExpiresAt: Date | null = null;
-
-          if (dto.evidence) {
-            const { mimeType, base64 } = dto.evidence;
-            if (mimeType !== 'image/jpeg' && mimeType !== 'image/png') {
-              throw new UnsupportedEvidenceTypeException(
-                'Tipo MIME de evidência não suportado. Utilize image/jpeg ou image/png.',
-              );
-            }
-
-            const buf = Buffer.from(base64, 'base64');
-            if (buf.length === 0) {
-              throw new InvalidRiskEventException(
-                'O conteúdo da evidência Base64 não pode ser vazio.',
-              );
-            }
-
-            if (buf.length > 5 * 1024 * 1024) {
-              throw new EvidenceTooLargeException(
-                'A evidência excede o tamanho máximo de 5 MiB.',
-              );
-            }
-
-            evidenceBuffer = buf;
-            evidenceMimeType = mimeType;
-            evidenceSizeBytes = BigInt(buf.length);
-            evidenceHashSha256 = createHash('sha256').update(buf).digest('hex');
-            evidenceExpiresAt = new Date(
-              now.getTime() + 30 * 24 * 60 * 60 * 1000,
-            );
-          }
+          // 5. Validar evidência opcional com política resiliente (não aborta o evento se inválida)
+          const evidenceResult = this.validateAndExtractEvidence(dto.evidence, now);
 
           // 6. Criar o alerta e a evidência
           const detectedAt = new Date(dto.detectedAt);
@@ -320,24 +298,44 @@ export class InternalAlertsService {
             },
           });
 
-          if (
-            evidenceBuffer &&
-            evidenceMimeType &&
-            evidenceSizeBytes &&
-            evidenceHashSha256 &&
-            evidenceExpiresAt
-          ) {
+          if (evidenceResult.status === 'VALID') {
             await tx.alertEvidence.create({
               data: {
                 alertId: alert.id,
-                mimeType: evidenceMimeType,
-                content: Uint8Array.from(evidenceBuffer),
-                sizeBytes: evidenceSizeBytes,
-                hashSha256: evidenceHashSha256,
-                expiresAt: evidenceExpiresAt,
+                mimeType: evidenceResult.evidence.mimeType,
+                content: Uint8Array.from(evidenceResult.evidence.buffer),
+                sizeBytes: evidenceResult.evidence.sizeBytes,
+                hashSha256: evidenceResult.evidence.hashSha256,
+                expiresAt: evidenceResult.evidence.expiresAt,
                 createdAt: now,
               },
             });
+          } else if (evidenceResult.status === 'DISCARDED') {
+            // Auditoria em log_sistema: registra motivo específico e sanitizado sem Base64 ou dados binários
+            await tx.systemLog.create({
+              data: {
+                level: 'AVISO',
+                category: 'ALERTA',
+                description: `Evidência descartada: ${evidenceResult.detail}`,
+                alertId: alert.id,
+                monitoringId: targetMonitoringId,
+                cameraId: camera.id,
+                data: {
+                  eventKey: eventKeyTrimmed,
+                  reason: evidenceResult.reason,
+                  detail: evidenceResult.detail,
+                  declaredMimeType:
+                    typeof (dto.evidence as Record<string, unknown>)?.['mimeType'] === 'string'
+                      ? ((dto.evidence as Record<string, unknown>)['mimeType'] as string)
+                      : null,
+                },
+                occurredAt: now,
+              },
+            });
+
+            this.logger.warn(
+              `Evidência descartada para alerta ${alert.id.toString()} [chave: ${eventKeyTrimmed}]: ${evidenceResult.reason} - ${evidenceResult.detail}`,
+            );
           }
 
           // 7. Obter acessos ativos da câmera (destinatários históricos)
@@ -529,5 +527,253 @@ export class InternalAlertsService {
 
       throw error;
     }
+  }
+
+  /**
+   * Valida sintaxe, formato, tipos, tamanho e assinatura binária (magic bytes) da evidência.
+   * Não lança exceção impeditiva: se a evidência estiver ausente, retorna ABSENT;
+   * se estiver inconsistente, retorna DISCARDED com motivo e detalhe sanitizados.
+   */
+  private validateAndExtractEvidence(
+    evidenceInput: unknown,
+    now: Date,
+  ): EvidenceValidationResult {
+    if (evidenceInput === undefined || evidenceInput === null) {
+      return { status: 'ABSENT' };
+    }
+
+    if (typeof evidenceInput !== 'object' || Array.isArray(evidenceInput)) {
+      return {
+        status: 'DISCARDED',
+        reason: 'INVALID_STRUCTURE',
+        detail: 'O campo evidence deve ser um objeto JSON.',
+      };
+    }
+
+    const raw = evidenceInput as Record<string, unknown>;
+    const mimeType = raw['mimeType'];
+    const base64 = raw['base64'];
+
+    if (typeof mimeType !== 'string' || typeof base64 !== 'string') {
+      return {
+        status: 'DISCARDED',
+        reason: 'INVALID_FIELD_TYPES',
+        detail: 'Os campos mimeType e base64 são obrigatórios e devem ser strings.',
+      };
+    }
+
+    const normalizedMime = mimeType.trim().toLowerCase();
+    if (normalizedMime !== 'image/jpeg' && normalizedMime !== 'image/png') {
+      return {
+        status: 'DISCARDED',
+        reason: 'UNSUPPORTED_MIME_TYPE',
+        detail: `Tipo MIME "${mimeType}" não suportado. Utilize image/jpeg ou image/png.`,
+      };
+    }
+
+    const trimmedBase64 = base64.trim();
+    if (trimmedBase64.length === 0) {
+      return {
+        status: 'DISCARDED',
+        reason: 'EMPTY_BASE64',
+        detail: 'A cadeia Base64 da evidência está vazia.',
+      };
+    }
+
+    const sanitizedBase64 = trimmedBase64.replace(/\s+/g, '');
+    if (
+      sanitizedBase64.length % 4 !== 0 ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(sanitizedBase64)
+    ) {
+      return {
+        status: 'DISCARDED',
+        reason: 'INVALID_BASE64_SYNTAX',
+        detail: 'A cadeia Base64 contém caracteres inválidos ou padding incorreto.',
+      };
+    }
+
+    let buf: Buffer;
+    try {
+      buf = Buffer.from(sanitizedBase64, 'base64');
+    } catch {
+      return {
+        status: 'DISCARDED',
+        reason: 'BASE64_DECODE_FAILED',
+        detail: 'Falha ao decodificar a cadeia Base64.',
+      };
+    }
+
+    if (buf.length === 0) {
+      return {
+        status: 'DISCARDED',
+        reason: 'EMPTY_DECODED_BUFFER',
+        detail: 'O conteúdo binário decodificado resultou em zero bytes.',
+      };
+    }
+
+    const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MiB
+    if (buf.length > MAX_SIZE_BYTES) {
+      return {
+        status: 'DISCARDED',
+        reason: 'EVIDENCE_TOO_LARGE',
+        detail: `A evidência decodificada possui ${buf.length} bytes, excedendo o teto máximo de 5 MiB.`,
+      };
+    }
+
+    // Validação de assinatura binária (magic bytes)
+    if (normalizedMime === 'image/jpeg') {
+      const isJpeg =
+        buf.length >= 3 &&
+        buf[0] === 0xff &&
+        buf[1] === 0xd8 &&
+        buf[2] === 0xff;
+
+      if (!isJpeg) {
+        return {
+          status: 'DISCARDED',
+          reason: 'BINARY_SIGNATURE_MISMATCH',
+          detail: 'Os bytes binários decodificados não contêm a assinatura de cabeçalho JPEG válida (FF D8 FF).',
+        };
+      }
+    } else if (normalizedMime === 'image/png') {
+      const isPng =
+        buf.length >= 8 &&
+        buf[0] === 0x89 &&
+        buf[1] === 0x50 &&
+        buf[2] === 0x4e &&
+        buf[3] === 0x47 &&
+        buf[4] === 0x0d &&
+        buf[5] === 0x0a &&
+        buf[6] === 0x1a &&
+        buf[7] === 0x0a;
+
+      if (!isPng) {
+        return {
+          status: 'DISCARDED',
+          reason: 'BINARY_SIGNATURE_MISMATCH',
+          detail: 'Os bytes binários decodificados não contêm a assinatura completa de 8 bytes do PNG (89 50 4E 47 0D 0A 1A 0A).',
+        };
+      }
+    }
+
+    const hashSha256 = createHash('sha256').update(buf).digest('hex');
+    const sizeBytes = BigInt(buf.length);
+    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    return {
+      status: 'VALID',
+      evidence: {
+        buffer: buf,
+        mimeType: normalizedMime as 'image/jpeg' | 'image/png',
+        sizeBytes,
+        hashSha256,
+        expiresAt,
+      },
+    };
+  }
+
+  /**
+   * Executa a rotina de expurgo periódico de evidências vencidas em lote atômico.
+   *
+   * Regras:
+   * 1. Seleciona até `limit` registros com `expiresAt <= now`, `removedAt == null` e `content != null`.
+   * 2. Ordenação estável por `expiresAt ASC`, `id ASC`.
+   * 3. Projeta apenas IDs (não carrega LONGBLOBs na memória do processo).
+   * 4. Atualiza atomicamente `content = null` e `removedAt = now` revalidando a elegibilidade.
+   * 5. Retorna a contagem processada e sinaliza se há pendências adicionais (`hasMore`).
+   * 6. Registra resumo operacional em `SystemLog` para auditoria.
+   */
+  async purgeExpiredEvidences(
+    limit = 100,
+    requestId = '',
+  ): Promise<PurgeEvidenceResponseDto> {
+    const prisma = this.prisma.getClient();
+    const now = new Date();
+    const safeLimit = Math.min(Math.max(limit, 1), 500);
+
+    // 1. Localizar lote de evidências elegíveis sem carregar o binário LONGBLOB
+    const expiredCandidates = await prisma.alertEvidence.findMany({
+      where: {
+        expiresAt: { lte: now },
+        removedAt: null,
+        content: { not: null },
+      },
+      select: {
+        id: true,
+        alertId: true,
+      },
+      orderBy: [
+        { expiresAt: 'asc' },
+        { id: 'asc' },
+      ],
+      take: safeLimit,
+    });
+
+    if (expiredCandidates.length === 0) {
+      return {
+        success: true,
+        purgedCount: 0,
+        hasMore: false,
+        remainingCount: 0,
+        executedAt: now.toISOString(),
+      };
+    }
+
+    const idsToPurge = expiredCandidates.map((e) => e.id);
+
+    // 2. Atualização atômica: limpa o LONGBLOB e preenche removida_em
+    const updateResult = await prisma.alertEvidence.updateMany({
+      where: {
+        id: { in: idsToPurge },
+        expiresAt: { lte: now },
+        removedAt: null,
+        content: { not: null },
+      },
+      data: {
+        content: null,
+        removedAt: now,
+      },
+    });
+
+    // 3. Contar pendências restantes após o lote atual
+    const remainingCount = await prisma.alertEvidence.count({
+      where: {
+        expiresAt: { lte: now },
+        removedAt: null,
+        content: { not: null },
+      },
+    });
+
+    const hasMore = remainingCount > 0;
+
+    // 4. Auditoria operacional em log_sistema
+    await prisma.systemLog.create({
+      data: {
+        level: 'AVISO',
+        category: 'SISTEMA',
+        description: `Rotina de expurgo de evidências executada: ${updateResult.count} evidências limpas neste lote. Restantes: ${remainingCount}.`,
+        data: {
+          purgedCount: updateResult.count,
+          remainingCount,
+          hasMore,
+          batchLimit: safeLimit,
+          executedAt: now.toISOString(),
+          requestId,
+        },
+        occurredAt: now,
+      },
+    });
+
+    this.logger.log(
+      `Expurgo de evidências concluído [req: ${requestId}]: ${updateResult.count} limpas, ${remainingCount} pendentes.`,
+    );
+
+    return {
+      success: true,
+      purgedCount: updateResult.count,
+      hasMore,
+      remainingCount,
+      executedAt: now.toISOString(),
+    };
   }
 }

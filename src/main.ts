@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 
 import { AppModule } from './app.module.js';
 import { ProblemDetailsFilter } from './common/filters/problem-details.filter.js';
+import { configureBodyParsers } from './common/setup/body-parser.setup.js';
 import {
   ProblemDetailsException,
   ProblemErrorItem,
@@ -49,7 +50,12 @@ async function bootstrap(): Promise<void> {
     bufferLogs: true,
     // Desabilita o logger padrão do Nest em favor do Pino
     rawBody: false,
+    // Desabilita o parser padrão (100kb fixo) para aplicar limites seletivos por rota
+    bodyParser: false,
   });
+
+  // Configuração de parsers JSON com limite estendido para rotas internas (10 MiB)
+  configureBodyParsers(app);
 
   // Logger estruturado (Pino)
   app.useLogger(app.get(Logger));

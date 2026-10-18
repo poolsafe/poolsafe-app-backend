@@ -10,6 +10,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 
 import { AppModule } from '../../dist/app.module.js';
 import { ProblemDetailsFilter } from '../../dist/common/filters/problem-details.filter.js';
+import { configureBodyParsers } from '../../dist/common/setup/body-parser.setup.js';
 import { PrismaService } from '../../dist/database/prisma.service.js';
 import { HashService } from '../../dist/modules/auth/hash.service.js';
 import { MonitoringsService } from '../../dist/modules/monitorings/monitorings.service.js';
@@ -149,7 +150,10 @@ before(async () => {
     app = await NestFactory.create<NestExpressApplication>(AppModule, {
       logger: false,
       rawBody: false,
+      bodyParser: false,
     });
+
+    configureBodyParsers(app);
 
     app.use(
       (
@@ -600,6 +604,15 @@ describe('Fatia 9B — Task 9B.2 — Persistência atômica e idempotente de ale
     assert.equal(body.summary.recipientsCount, 1);
     assert.equal(body.summary.notificationsCount, 1);
     assert.equal(body.summary.deliveriesCount, 1);
+
+    // Reativar monitoramento para não interferir em testes subsequentes
+    await client.monitoring.update({
+      where: { id: monitoringId },
+      data: {
+        status: 'ATIVO',
+        pausedAt: null,
+      },
+    });
   });
 
   test('7. Destinatário sem dispositivo elegível: gera notificação SEM_DISPOSITIVO sem criar entregas fictícias', async () => {
@@ -777,17 +790,18 @@ describe('Fatia 9B — Task 9B.2 — Persistência atômica e idempotente de ale
     assert.ok(systemLog);
   });
 
-  test('9. Validação de payload: tipo MIME inválido é rejeitado antes da persistência (422)', async () => {
+  test('9. Resiliência de evidência: tipo MIME inválido descarta evidência com log sem abortar o alerta (202); validação central preservada (422)', async () => {
     const client = prisma.getClient();
 
     const camera = await client.camera.findUniqueOrThrow({
       where: { integrationCode: 'test.cam.internal.c1' },
     });
 
-    const invalidEventKey = 'test.evt.internal.validation.mime.1';
+    const invalidMimeEventKey = 'test.evt.internal.resilience.mime.1';
 
-    // Evidência com tipo MIME não suportado (ex: application/pdf)
-    const res = await fetch(`${baseUrl}/internal/alerts`, {
+    // 1. Evidência com tipo MIME não suportado (ex: application/pdf)
+    // O evento DEVE ser aceito (202), persistir o alerta e notificações, descartando apenas a imagem
+    const resResilient = await fetch(`${baseUrl}/internal/alerts`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -795,7 +809,7 @@ describe('Fatia 9B — Task 9B.2 — Persistência atômica e idempotente de ale
       },
       body: JSON.stringify({
         schemaVersion: '1',
-        eventKey: invalidEventKey,
+        eventKey: invalidMimeEventKey,
         cameraCode: camera.integrationCode,
         severity: 'CRITICA',
         detectedAt: new Date().toISOString(),
@@ -806,13 +820,54 @@ describe('Fatia 9B — Task 9B.2 — Persistência atômica e idempotente de ale
       }),
     });
 
-    assert.equal(res.status, 422); // ValidationPipe rejeita mimeType inválido com 422 Problem Details
+    assert.equal(resResilient.status, 202);
+    const bodyResilient = await resResilient.json();
+    assert.equal(bodyResilient.accepted, true);
+    assert.equal(bodyResilient.eventKey, invalidMimeEventKey);
 
-    // Garantir que nenhum alerta parcial foi criado
     const alertInDb = await client.alert.findUnique({
-      where: { eventKey: invalidEventKey },
+      where: { eventKey: invalidMimeEventKey },
+      include: {
+        evidence: true,
+        recipients: {
+          include: { notification: { include: { deliveries: true } } },
+        },
+      },
     });
-    assert.equal(alertInDb, null);
+    assert.ok(alertInDb, 'Alerta deve ter sido persistido com sucesso');
+    assert.equal(alertInDb.evidence, null, 'Evidência inválida não deve ter sido gravada no banco');
+    assert.equal(alertInDb.recipients.length, 1);
+    assert.equal(alertInDb.recipients[0].notification?.deliveries.length, 1);
+
+    // Conferir registro de auditoria em log_sistema com motivo sanitizado
+    const discardLog = await client.systemLog.findFirst({
+      where: {
+        alertId: alertInDb.id,
+        level: 'AVISO',
+        category: 'ALERTA',
+      },
+    });
+    assert.ok(discardLog, 'Log de auditoria AVISO deve ter sido gravado');
+    const logData = discardLog.data as Record<string, unknown>;
+    assert.equal(logData['reason'], 'UNSUPPORTED_MIME_TYPE');
+    assert.equal(logData['declaredMimeType'], 'application/pdf');
+
+    // 2. Preservação estrita das validações dos campos centrais (ex: severidade inválida -> 422)
+    const resInvalidCore = await fetch(`${baseUrl}/internal/alerts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Service-Key': TEST_SERVICE_KEY,
+      },
+      body: JSON.stringify({
+        schemaVersion: '1',
+        eventKey: 'test.evt.internal.invalid.core.1',
+        cameraCode: camera.integrationCode,
+        severity: 'SEVERIDADE_INVALIDA',
+        detectedAt: new Date().toISOString(),
+      }),
+    });
+    assert.equal(resInvalidCore.status, 422, 'Campo central inválido deve continuar rejeitado com 422');
   });
 
   test('10. Rollback atômico pós-escrita: falha interna após escrita desfaz transação e não deixa registros parciais', async () => {
@@ -1068,5 +1123,432 @@ describe('Fatia 9B — Task 9B.2 — Persistência atômica e idempotente de ale
       where: { id: monitoring.id },
     });
     assert.equal(finalMonitoring.status, 'PAUSADO');
+  });
+
+  test('12. Evidência PNG válida: assinatura completa de 8 bytes (89 50 4E 47 0D 0A 1A 0A) é aceita e armazenada', async () => {
+    const client = prisma.getClient();
+    const camera = await client.camera.findUniqueOrThrow({
+      where: { integrationCode: 'test.cam.internal.c1' },
+    });
+
+    const pngHeader = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+      0x49, 0x48, 0x44, 0x52,
+    ]);
+    const eventKey = 'test.evt.internal.png.valid.1';
+
+    const res = await fetch(`${baseUrl}/internal/alerts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Service-Key': TEST_SERVICE_KEY,
+      },
+      body: JSON.stringify({
+        schemaVersion: '1',
+        eventKey,
+        cameraCode: camera.integrationCode,
+        severity: 'CRITICA',
+        detectedAt: new Date().toISOString(),
+        evidence: {
+          mimeType: 'image/png',
+          base64: pngHeader.toString('base64'),
+        },
+      }),
+    });
+
+    assert.equal(res.status, 202);
+    const body = await res.json();
+    assert.equal(body.accepted, true);
+
+    const alertInDb = await client.alert.findUnique({
+      where: { eventKey },
+      include: { evidence: true },
+    });
+    assert.ok(alertInDb?.evidence);
+    assert.equal(alertInDb.evidence.mimeType, 'image/png');
+    assert.equal(alertInDb.evidence.sizeBytes, BigInt(pngHeader.length));
+    assert.ok(alertInDb.evidence.content);
+    assert.deepEqual(Buffer.from(alertInDb.evidence.content), pngHeader);
+  });
+
+  test('13. Descarte de evidência por sintaxe Base64 inválida ou divergência de magic bytes sem abortar alerta', async () => {
+    const client = prisma.getClient();
+    const camera = await client.camera.findUniqueOrThrow({
+      where: { integrationCode: 'test.cam.internal.c1' },
+    });
+
+    // Caso A: Base64 corrompido / caracteres inválidos
+    const eventKeyBadBase64 = 'test.evt.internal.bad.base64.1';
+    const resBadBase64 = await fetch(`${baseUrl}/internal/alerts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Service-Key': TEST_SERVICE_KEY,
+      },
+      body: JSON.stringify({
+        schemaVersion: '1',
+        eventKey: eventKeyBadBase64,
+        cameraCode: camera.integrationCode,
+        severity: 'CRITICA',
+        detectedAt: new Date().toISOString(),
+        evidence: {
+          mimeType: 'image/jpeg',
+          base64: 'caracteres-invalidos!@#$%',
+        },
+      }),
+    });
+
+    assert.equal(resBadBase64.status, 202);
+    const alertBadBase64 = await client.alert.findUnique({
+      where: { eventKey: eventKeyBadBase64 },
+      include: { evidence: true },
+    });
+    assert.ok(alertBadBase64);
+    assert.equal(alertBadBase64.evidence, null, 'Evidência corrompida deve ser descartada');
+
+    // Caso B: MIME declarado image/jpeg mas bytes não contêm assinatura FF D8 FF
+    const eventKeyBadMagic = 'test.evt.internal.bad.magic.1';
+    const nonJpegBuffer = Buffer.from('TEXTO_QUE_NAO_E_JPEG_HEADER');
+    const resBadMagic = await fetch(`${baseUrl}/internal/alerts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Service-Key': TEST_SERVICE_KEY,
+      },
+      body: JSON.stringify({
+        schemaVersion: '1',
+        eventKey: eventKeyBadMagic,
+        cameraCode: camera.integrationCode,
+        severity: 'CRITICA',
+        detectedAt: new Date().toISOString(),
+        evidence: {
+          mimeType: 'image/jpeg',
+          base64: nonJpegBuffer.toString('base64'),
+        },
+      }),
+    });
+
+    assert.equal(resBadMagic.status, 202);
+    const alertBadMagic = await client.alert.findUnique({
+      where: { eventKey: eventKeyBadMagic },
+      include: { evidence: true },
+    });
+    assert.ok(alertBadMagic);
+    assert.equal(alertBadMagic.evidence, null, 'Evidência sem magic bytes correspondentes deve ser descartada');
+  });
+
+  test('14. Descarte de evidência acima de 5 MiB decodificado sem impedir criação do alerta', async () => {
+    const client = prisma.getClient();
+    const camera = await client.camera.findUniqueOrThrow({
+      where: { integrationCode: 'test.cam.internal.c1' },
+    });
+
+    // Cria buffer de 5,1 MiB com cabeçalho JPEG válido
+    const oversizedBuffer = Buffer.alloc(5 * 1024 * 1024 + 1024);
+    oversizedBuffer[0] = 0xff;
+    oversizedBuffer[1] = 0xd8;
+    oversizedBuffer[2] = 0xff;
+
+    const eventKeyOversized = 'test.evt.internal.oversized.1';
+
+    const res = await fetch(`${baseUrl}/internal/alerts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Service-Key': TEST_SERVICE_KEY,
+      },
+      body: JSON.stringify({
+        schemaVersion: '1',
+        eventKey: eventKeyOversized,
+        cameraCode: camera.integrationCode,
+        severity: 'CRITICA',
+        detectedAt: new Date().toISOString(),
+        evidence: {
+          mimeType: 'image/jpeg',
+          base64: oversizedBuffer.toString('base64'),
+        },
+      }),
+    });
+
+    assert.equal(res.status, 202);
+    const alertInDb = await client.alert.findUnique({
+      where: { eventKey: eventKeyOversized },
+      include: { evidence: true },
+    });
+    assert.ok(alertInDb);
+    assert.equal(alertInDb.evidence, null, 'Evidência maior que 5 MiB deve ser descartada');
+
+    const discardLog = await client.systemLog.findFirst({
+      where: {
+        alertId: alertInDb.id,
+        level: 'AVISO',
+        category: 'ALERTA',
+      },
+    });
+    assert.ok(discardLog);
+    const logData = discardLog.data as Record<string, unknown>;
+    assert.equal(logData['reason'], 'EVIDENCE_TOO_LARGE');
+  });
+
+  test('15. Limites seletivos do body parser HTTP (413): rejeição padronizada RFC 9457 sem expor conteúdo', async () => {
+    // 1. Rota pública com limite restritivo de 100 KiB: payload de 150 KiB retorna 413
+    const largePublicPayload = JSON.stringify({
+      email: 'test@example.com',
+      password: 'A'.repeat(150 * 1024),
+    });
+
+    const publicRes = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: largePublicPayload,
+    });
+
+    assert.equal(publicRes.status, 413);
+    const publicProblem = await publicRes.json();
+    assert.equal(publicProblem.code, 'PAYLOAD_TOO_LARGE');
+    assert.equal(publicProblem.status, 413);
+    assert.ok(!JSON.stringify(publicProblem).includes('AAAA'));
+
+    // 2. Rota interna com limite estendido de 10 MiB: payload de 11 MiB retorna 413
+    const largeInternalPayload = JSON.stringify({
+      schemaVersion: '1',
+      eventKey: 'test.evt.internal.too.large.1',
+      cameraCode: 'CAM-DUMMY',
+      severity: 'CRITICA',
+      detectedAt: new Date().toISOString(),
+      bigGarbage: 'X'.repeat(11 * 1024 * 1024),
+    });
+
+    const internalRes = await fetch(`${baseUrl}/internal/alerts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Service-Key': TEST_SERVICE_KEY,
+      },
+      body: largeInternalPayload,
+    });
+
+    assert.equal(internalRes.status, 413);
+    const internalProblem = await internalRes.json();
+    assert.equal(internalProblem.code, 'PAYLOAD_TOO_LARGE');
+    assert.equal(internalProblem.status, 413);
+    assert.ok(!JSON.stringify(internalProblem).includes('XXXX'));
+  });
+
+  test('16. Idempotência com evidência expurgada: repetição de chave após expurgo não duplica nem restaura imagem limpa', async () => {
+    const client = prisma.getClient();
+    const camera = await client.camera.findUniqueOrThrow({
+      where: { integrationCode: 'test.cam.internal.c1' },
+    });
+
+    const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+    const eventKey = 'test.evt.internal.idempotence.purged.1';
+
+    // 1. Criar alerta com evidência válida
+    const createRes = await fetch(`${baseUrl}/internal/alerts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Service-Key': TEST_SERVICE_KEY,
+      },
+      body: JSON.stringify({
+        schemaVersion: '1',
+        eventKey,
+        cameraCode: camera.integrationCode,
+        severity: 'CRITICA',
+        detectedAt: new Date().toISOString(),
+        evidence: {
+          mimeType: 'image/jpeg',
+          base64: jpegBuffer.toString('base64'),
+        },
+      }),
+    });
+
+    assert.equal(createRes.status, 202);
+    const createdAlert = await client.alert.findUniqueOrThrow({
+      where: { eventKey },
+      include: { evidence: true },
+    });
+    assert.ok(createdAlert.evidence?.content);
+
+    // 2. Simular expurgo da evidência
+    const purgedAt = new Date();
+    await client.alertEvidence.update({
+      where: { id: createdAlert.evidence.id },
+      data: {
+        content: null,
+        removedAt: purgedAt,
+      },
+    });
+
+    // 3. Reenviar exatamente a mesma requisição com a imagem presente
+    const duplicateRes = await fetch(`${baseUrl}/internal/alerts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Service-Key': TEST_SERVICE_KEY,
+      },
+      body: JSON.stringify({
+        schemaVersion: '1',
+        eventKey,
+        cameraCode: camera.integrationCode,
+        severity: 'CRITICA',
+        detectedAt: new Date().toISOString(),
+        evidence: {
+          mimeType: 'image/jpeg',
+          base64: jpegBuffer.toString('base64'),
+        },
+      }),
+    });
+
+    assert.equal(duplicateRes.status, 202);
+    const duplicateBody = await duplicateRes.json();
+    assert.equal(duplicateBody.duplicate, true);
+
+    // 4. Comprovar que a evidência NÃO foi restaurada nem duplicada
+    const alertAfterDup = await client.alert.findUniqueOrThrow({
+      where: { eventKey },
+      include: { evidence: true },
+    });
+    assert.equal(alertAfterDup.evidence?.content, null, 'Conteúdo deve permanecer NULL');
+    assert.ok(alertAfterDup.evidence?.removedAt, 'removida_em deve permanecer preenchido');
+  });
+
+  test('17. Expurgo periódico (POST /internal/alerts/purge-evidence): autenticação, lotes, atomicidade e idempotência', async () => {
+    const client = prisma.getClient();
+    const camera = await client.camera.findUniqueOrThrow({
+      where: { integrationCode: 'test.cam.internal.c1' },
+      include: { monitoringCameras: true },
+    });
+
+    // 1. Rejeição sem chave interna (401)
+    const unauthorizedRes = await fetch(`${baseUrl}/internal/alerts/purge-evidence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    assert.equal(unauthorizedRes.status, 401);
+
+    // 2. Criar 3 alertas com evidências vencidas e 1 com evidência futura
+    const now = new Date();
+
+    // Isolar o teste garantindo que não existam evidências vencidas residuais de seeds anteriores
+    await client.alertEvidence.updateMany({
+      where: {
+        expiresAt: { lte: now },
+        removedAt: null,
+      },
+      data: {
+        content: null,
+        removedAt: now,
+      },
+    });
+
+    const dummyBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+
+    const expiredAlerts = await Promise.all(
+      [1, 2, 3].map(async (i) => {
+        const alert = await client.alert.create({
+          data: {
+            eventKey: `test.evt.internal.purge.batch.${i}.${randomUUID()}`,
+            monitoringId: camera.monitoringCameras[0]!.monitoringId,
+            cameraId: camera.id,
+            severity: 'CRITICA',
+            detectedAt: new Date(now.getTime() - 40 * 86_400_000),
+          },
+        });
+        const evidence = await client.alertEvidence.create({
+          data: {
+            alertId: alert.id,
+            mimeType: 'image/jpeg',
+            content: dummyBytes,
+            sizeBytes: BigInt(dummyBytes.length),
+            hashSha256: 'a'.repeat(64),
+            createdAt: new Date(now.getTime() - 40 * 86_400_000),
+            expiresAt: new Date(now.getTime() - 10 * 86_400_000), // vencida há 10 dias
+          },
+        });
+        return { alert, evidence };
+      }),
+    );
+
+    // Alerta com evidência VÁLIDA e não expirada
+    const unexpiredAlert = await client.alert.create({
+      data: {
+        eventKey: `test.evt.internal.purge.unexpired.${randomUUID()}`,
+        monitoringId: camera.monitoringCameras[0]!.monitoringId,
+        cameraId: camera.id,
+        severity: 'CRITICA',
+        detectedAt: now,
+      },
+    });
+    const unexpiredEvidence = await client.alertEvidence.create({
+      data: {
+        alertId: unexpiredAlert.id,
+        mimeType: 'image/jpeg',
+        content: dummyBytes,
+        sizeBytes: BigInt(dummyBytes.length),
+        hashSha256: 'b'.repeat(64),
+        expiresAt: new Date(now.getTime() + 25 * 86_400_000), // expira em 25 dias
+      },
+    });
+
+    // 3. Executar primeiro lote com limit=2 (deve processar 2 e sinalizar hasMore=true)
+    const batch1Res = await fetch(`${baseUrl}/internal/alerts/purge-evidence?limit=2`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Service-Key': TEST_SERVICE_KEY,
+      },
+    });
+    assert.equal(batch1Res.status, 200);
+    const batch1Body = await batch1Res.json();
+    assert.equal(batch1Body.success, true);
+    assert.equal(batch1Body.purgedCount, 2);
+    assert.equal(batch1Body.hasMore, true);
+    assert.equal(batch1Body.remainingCount, 1);
+
+    // 4. Executar segundo lote (deve processar a 1 restante e sinalizar hasMore=false)
+    const batch2Res = await fetch(`${baseUrl}/internal/alerts/purge-evidence?limit=2`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Service-Key': TEST_SERVICE_KEY,
+      },
+    });
+    assert.equal(batch2Res.status, 200);
+    const batch2Body = await batch2Res.json();
+    assert.equal(batch2Body.success, true);
+    assert.equal(batch2Body.purgedCount, 1);
+    assert.equal(batch2Body.hasMore, false);
+    assert.equal(batch2Body.remainingCount, 0);
+
+    // 5. Verificar que as 3 vencidas foram limpas e a não vencida permanece intacta
+    for (const item of expiredAlerts) {
+      const reloaded = await client.alertEvidence.findUniqueOrThrow({
+        where: { id: item.evidence.id },
+      });
+      assert.equal(reloaded.content, null);
+      assert.ok(reloaded.removedAt !== null);
+    }
+
+    const reloadedUnexpired = await client.alertEvidence.findUniqueOrThrow({
+      where: { id: unexpiredEvidence.id },
+    });
+    assert.ok(reloadedUnexpired.content !== null, 'Evidência não expirada deve manter conteúdo');
+    assert.equal(reloadedUnexpired.removedAt, null);
+
+    // 6. Chamada repetida (idempotência): nada a expurgar
+    const emptyRes = await fetch(`${baseUrl}/internal/alerts/purge-evidence`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Service-Key': TEST_SERVICE_KEY,
+      },
+    });
+    assert.equal(emptyRes.status, 200);
+    const emptyBody = await emptyRes.json();
+    assert.equal(emptyBody.purgedCount, 0);
+    assert.equal(emptyBody.hasMore, false);
+    assert.equal(emptyBody.remainingCount, 0);
   });
 });

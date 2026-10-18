@@ -64,6 +64,12 @@ function getDefaultProblemMetadata(status: number): { code: string; title: strin
         title: 'Limite temporário excedido',
         detail: 'Muitas requisições. Tente novamente mais tarde.',
       };
+    case HttpStatus.PAYLOAD_TOO_LARGE:
+      return {
+        code: 'PAYLOAD_TOO_LARGE',
+        title: 'Payload muito grande',
+        detail: 'O tamanho da requisição excede o limite permitido.',
+      };
     case HttpStatus.SERVICE_UNAVAILABLE:
       return {
         code: 'SERVICE_UNAVAILABLE',
@@ -140,12 +146,21 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         }
       }
     } else if (exception instanceof Error) {
-      // Tratar erro de sintaxe JSON do body-parser
+      // Tratar erros do middleware body-parser (sintaxe JSON inválida ou payload excedente)
       if ('type' in exception && exception.type === 'entity.parse.failed') {
         status = HttpStatus.BAD_REQUEST;
         code = 'MALFORMED_REQUEST';
         title = 'Requisição inválida';
         detail = 'Corpo da requisição ilegível ou JSON inválido.';
+      } else if (
+        ('type' in exception && exception.type === 'entity.too.large') ||
+        ('status' in exception && (exception as Record<string, unknown>)['status'] === 413) ||
+        ('statusCode' in exception && (exception as Record<string, unknown>)['statusCode'] === 413)
+      ) {
+        status = HttpStatus.PAYLOAD_TOO_LARGE;
+        code = 'PAYLOAD_TOO_LARGE';
+        title = 'Payload muito grande';
+        detail = 'O tamanho da requisição excede o limite permitido.';
       } else {
         // Erros internos: logar sem expor detalhes internos ao cliente
         this.logger.error({ requestId, err: exception }, 'Unhandled exception');
