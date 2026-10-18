@@ -24,6 +24,12 @@ export class FcmAlertPayloadDataDto {
 
   @ApiProperty({ example: 'poolsafe_alertas_criticos_v2' })
   channelId!: string;
+
+  @ApiPropertyOptional({
+    description: 'Timestamp UTC ISO-8601 da detecção original do alerta',
+    example: '2026-10-17T20:00:00.000Z',
+  })
+  detectedAt?: string;
 }
 
 export class FcmMessageHttpV1Dto {
@@ -40,11 +46,12 @@ export class FcmMessageHttpV1Dto {
   data!: FcmAlertPayloadDataDto;
 
   @ApiProperty({
-    description: 'Configuração específica do Android (data-only, prioridade HIGH)',
-    example: { priority: 'HIGH' },
+    description: 'Configuração específica do Android (data-only, prioridade HIGH, TTL 300s)',
+    example: { priority: 'HIGH', ttl: '300s' },
   })
   android!: {
     priority: string;
+    ttl?: string;
   };
 }
 

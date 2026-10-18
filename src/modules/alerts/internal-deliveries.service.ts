@@ -480,7 +480,15 @@ export class InternalDeliveriesService {
         const delivery = await tx.notificationDelivery.findUnique({
           where: { id: deliveryId },
           include: {
-            notification: true,
+            notification: {
+              include: {
+                alertRecipient: {
+                  include: {
+                    alert: true,
+                  },
+                },
+              },
+            },
             device: true,
           },
         });
@@ -678,6 +686,10 @@ export class InternalDeliveriesService {
 
         // 9. Montagem do payload definido (data-only, Android HIGH, todas as propriedades como string)
         const targetToken = device.fcmToken!;
+        const originalDetectedAt =
+          delivery.notification.alertRecipient?.alert?.detectedAt?.toISOString() ||
+          delivery.notification.createdAt.toISOString();
+
         const payloadData: FcmAlertPayloadDataDto = {
           schemaVersion: '1',
           type: 'ALERT',
@@ -687,6 +699,7 @@ export class InternalDeliveriesService {
           title: delivery.notification.title,
           message: delivery.notification.message,
           channelId: 'poolsafe_alertas_criticos_v2',
+          detectedAt: originalDetectedAt,
         };
 
         const fcmMessage: FcmMessageHttpV1Dto = {
@@ -694,6 +707,7 @@ export class InternalDeliveriesService {
           data: payloadData,
           android: {
             priority: 'HIGH',
+            ttl: '300s',
           },
         };
 

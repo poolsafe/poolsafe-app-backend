@@ -341,10 +341,12 @@ describe('Fatia 9B.3 — Envio e Rastreabilidade FCM (Internal Deliveries)', () 
     assert.equal(body.payload.channelId, 'poolsafe_alertas_criticos_v2');
     assert.equal(typeof body.payload.title, 'string');
     assert.equal(typeof body.payload.message, 'string');
+    assert.equal(body.payload.detectedAt, scenario.alert.detectedAt.toISOString());
 
     // Mensagem FCM completa para HTTP v1
     assert.equal(body.fcmMessage.token, scenario.device.fcmToken);
     assert.equal(body.fcmMessage.android.priority, 'HIGH');
+    assert.equal(body.fcmMessage.android.ttl, '300s');
 
     // Verificar no banco de dados que a tentativa foi incrementada e data registrada
     const inDb = await prisma.getClient().notificationDelivery.findUnique({
