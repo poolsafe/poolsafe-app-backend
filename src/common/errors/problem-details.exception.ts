@@ -344,4 +344,20 @@ export class NotificationNotFoundException extends ProblemDetailsException {
   }
 }
 
+export class InvalidCameraHeartbeatException extends ProblemDetailsException {
+  constructor(
+    detail = 'Um ou mais campos do heartbeat são inválidos.',
+    errors?: ProblemErrorItem[],
+  ) {
+    super({
+      status: HttpStatus.BAD_REQUEST,
+      code: 'VALIDATION_ERROR',
+      title: 'Dados inválidos',
+      detail,
+      errors,
+    });
+  }
+}
+
+
 

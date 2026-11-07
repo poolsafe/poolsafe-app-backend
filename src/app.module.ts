@@ -59,7 +59,10 @@ function validateEnv(config: Record<string, unknown>): EnvConfig {
             : undefined,
         serializers: {
           req: (req: Record<string, unknown> & { raw: { body?: unknown } }) => {
-            req['body'] = req.raw?.body;
+            const url = typeof req['url'] === 'string' ? req['url'] : '';
+            if (!url.includes('/internal/cameras/heartbeat')) {
+              req['body'] = req.raw?.body;
+            }
             return req;
           },
         },
