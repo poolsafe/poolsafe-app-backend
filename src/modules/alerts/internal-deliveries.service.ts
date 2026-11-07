@@ -690,15 +690,23 @@ export class InternalDeliveriesService {
           delivery.notification.alertRecipient?.alert?.detectedAt?.toISOString() ||
           delivery.notification.createdAt.toISOString();
 
+        const alertSeverity =
+          delivery.notification.alertRecipient?.alert?.severity === 'ATENCAO'
+            ? 'ATENCAO'
+            : 'CRITICA';
+
         const payloadData: FcmAlertPayloadDataDto = {
           schemaVersion: '1',
           type: 'ALERT',
           alertId: delivery.notification.alertId.toString(),
           deliveryId: delivery.id.toString(),
-          severity: 'CRITICA',
+          severity: alertSeverity,
           title: delivery.notification.title,
           message: delivery.notification.message,
-          channelId: 'poolsafe_alertas_criticos_v2',
+          channelId:
+            alertSeverity === 'CRITICA'
+              ? 'poolsafe_alertas_criticos_v2'
+              : 'poolsafe_delayed_alerts_v1',
           detectedAt: originalDetectedAt,
         };
 

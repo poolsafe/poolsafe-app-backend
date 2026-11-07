@@ -1407,4 +1407,31 @@ describe('Fatia 9B.3 — Envio e Rastreabilidade FCM (Internal Deliveries)', () 
     assert.equal(devDb?.fcmToken, tokenNovoConcorrente);
     assert.equal(devDb?.invalidatedAt, null);
   });
+
+  test('20. Preparar tentativa de alerta ATENCAO retorna severity ATENCAO e canal silencioso', async () => {
+    const scenario = await createTestScenario('prepare_atencao_20');
+
+    await prisma.getClient().alert.update({
+      where: { id: scenario.alert.id },
+      data: { severity: 'ATENCAO' },
+    });
+
+    const res = await fetch(
+      `${baseUrl}/api/v1/internal/deliveries/${scenario.delivery.id}/prepare`,
+      {
+        method: 'POST',
+        headers: {
+          'X-Internal-Service-Key': TEST_SERVICE_KEY,
+        },
+      },
+    );
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ready, true);
+    assert.equal(body.payload.severity, 'ATENCAO');
+    assert.equal(body.payload.channelId, 'poolsafe_delayed_alerts_v1');
+    assert.equal(body.fcmMessage.data.severity, 'ATENCAO');
+    assert.equal(body.fcmMessage.data.channelId, 'poolsafe_delayed_alerts_v1');
+  });
 });
